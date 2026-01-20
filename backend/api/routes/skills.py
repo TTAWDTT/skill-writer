@@ -9,7 +9,8 @@ from typing import List
 import yaml
 
 from backend.core.skills.registry import get_registry, init_skills_from_directory
-from backend.core.skills.template_parser import parse_template_file, generate_skill_from_template
+from backend.core.skills.template_parser import parse_template_file
+from backend.core.skills.skill_generator import generate_skill_with_llm
 from backend.config import SKILLS_DIR
 
 router = APIRouter()
@@ -42,7 +43,7 @@ async def create_skill_from_template(
     tags: str = Form("")
 ):
     """
-    从模板文件创建新的 Skill
+    从模板文件创建新的 Skill（使用 LLM 分析模板）
 
     Args:
         file: 模板文件 (md, doc, docx, pdf, txt)
@@ -61,16 +62,30 @@ async def create_skill_from_template(
             detail=f"Unsupported file type: {file_ext}. Allowed: {', '.join(allowed_extensions)}"
         )
 
+    skill_dir = None
     try:
         # 读取文件内容
         content = await file.read()
 
-        # 解析模板文件
+        # 解析模板文件为文本
         template_content = parse_template_file(content, file_ext, file.filename)
 
-        # 生成 skill_id
-        skill_id = re.sub(r'[^a-z0-9-]', '-', name.lower())
-        skill_id = re.sub(r'-+', '-', skill_id).strip('-')
+        # 解析标签
+        tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
+
+        # 使用 LLM 分析模板并生成 Skill 配置
+        skill_config = await generate_skill_with_llm(
+            template_content=template_content,
+            skill_name=name,
+            description=description,
+            category=category,
+            tags=tag_list
+        )
+
+        skill_id = skill_config.get("skill_id")
+        if not skill_id:
+            skill_id = re.sub(r'[^a-z0-9-]', '-', name.lower())
+            skill_id = re.sub(r'-+', '-', skill_id).strip('-')
 
         # 检查是否已存在
         skill_dir = SKILLS_DIR / skill_id
@@ -80,34 +95,21 @@ async def create_skill_from_template(
                 detail=f"Skill '{skill_id}' already exists"
             )
 
-        # 解析标签
-        tag_list = [t.strip() for t in tags.split(',') if t.strip()] if tags else []
-
-        # 生成 Skill 配置
-        skill_config = generate_skill_from_template(
-            template_content=template_content,
-            skill_id=skill_id,
-            name=name,
-            description=description,
-            category=category,
-            tags=tag_list
-        )
-
         # 创建 Skill 目录和文件
         skill_dir.mkdir(parents=True, exist_ok=True)
 
         # 写入 SKILL.md
         skill_md_content = f"""---
 name: {skill_id}
-description: {description or f'Writing skill for {name}'}
+description: {skill_config.get('description', f'Writing skill for {name}')}
 version: "1.0.0"
-category: {category or 'custom'}
-tags: {tag_list}
+category: {skill_config.get('category', 'custom')}
+tags: {skill_config.get('tags', [])}
 author: user
 user-invocable: true
 ---
 
-# {name}
+# {skill_config.get('name', name)}
 
 {skill_config.get('instructions', f'This skill helps write documents based on the {name} template.')}
 """
@@ -157,14 +159,14 @@ user-invocable: true
         return {
             "success": True,
             "skill_id": skill_id,
-            "message": f"Skill '{name}' created successfully"
+            "message": f"Skill '{name}' created successfully using LLM analysis"
         }
 
     except HTTPException:
         raise
     except Exception as e:
         # 清理失败的目录
-        if 'skill_dir' in locals() and skill_dir.exists():
+        if skill_dir and skill_dir.exists():
             shutil.rmtree(skill_dir)
         raise HTTPException(status_code=500, detail=f"Failed to create skill: {str(e)}")
 
