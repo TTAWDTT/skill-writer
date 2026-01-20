@@ -100,21 +100,50 @@
           </div>
           <h3 class="font-semibold text-dark-300">Document Preview</h3>
         </div>
-        <div class="flex gap-2">
+        <div v-if="documentContent" class="flex gap-2">
           <button
-            v-if="documentContent"
             @click="copyDocument"
-            class="px-4 py-2 text-sm bg-warm-200 text-dark-100 rounded-xl hover:bg-warm-300 transition-colors font-medium"
+            class="px-3 py-2 text-sm bg-warm-200 text-dark-100 rounded-xl hover:bg-warm-300 transition-colors font-medium"
           >
             Copy
           </button>
-          <button
-            v-if="documentContent"
-            @click="downloadDocument"
-            class="px-4 py-2 text-sm bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-orange-dark transition-colors font-medium shadow-sm"
-          >
-            Download
-          </button>
+          <div class="relative" ref="exportDropdown">
+            <button
+              @click="showExportMenu = !showExportMenu"
+              class="px-3 py-2 text-sm bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-orange-dark transition-colors font-medium shadow-sm flex items-center gap-1"
+            >
+              Export
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            <div
+              v-if="showExportMenu"
+              class="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-warm-300 py-2 z-10"
+            >
+              <button
+                @click="exportAs('md')"
+                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
+              >
+                <span class="w-6 text-center text-xs font-mono bg-warm-200 rounded px-1">MD</span>
+                Markdown
+              </button>
+              <button
+                @click="exportAs('docx')"
+                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
+              >
+                <span class="w-6 text-center text-xs font-mono bg-blue-100 text-blue-700 rounded px-1">W</span>
+                Word (.docx)
+              </button>
+              <button
+                @click="exportAs('pdf')"
+                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
+              >
+                <span class="w-6 text-center text-xs font-mono bg-red-100 text-red-700 rounded px-1">PDF</span>
+                PDF
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -144,7 +173,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { api } from '../api'
@@ -165,6 +194,9 @@ const phase = ref('init')
 const messagesContainer = ref(null)
 const currentSection = ref('')
 const writingProgress = ref({ current: 0, total: 0 })
+const showExportMenu = ref(false)
+const exportDropdown = ref(null)
+const currentSectionLevel = ref(1)
 
 // Computed
 const phaseText = computed(() => {
@@ -288,7 +320,14 @@ const startStreamGeneration = async () => {
 
         case 'section_start':
           currentSection.value = data.section_title
+          currentSectionLevel.value = data.section_level || 1
           writingProgress.value.current = data.section_index
+          // 添加标题到文档（带换行）
+          if (documentContent.value && !documentContent.value.endsWith('\n\n')) {
+            documentContent.value += '\n\n'
+          }
+          const heading = '#'.repeat(currentSectionLevel.value) + ' ' + data.section_title
+          documentContent.value += heading + '\n\n'
           break
 
         case 'chunk':
@@ -354,15 +393,51 @@ const copyDocument = () => {
   }
 }
 
-const downloadDocument = () => {
-  if (documentContent.value) {
-    const blob = new Blob([documentContent.value], { type: 'text/markdown' })
-    const url = URL.createObjectURL(blob)
-    const a = window.document.createElement('a')
-    a.href = url
-    a.download = `${skill.value?.name || 'document'}.md`
-    a.click()
-    URL.revokeObjectURL(url)
+const exportAs = async (format) => {
+  showExportMenu.value = false
+  if (!documentContent.value) return
+
+  const filename = skill.value?.name || 'document'
+
+  if (format === 'md') {
+    // 直接下载 Markdown
+    const blob = new Blob([documentContent.value], { type: 'text/markdown;charset=utf-8' })
+    downloadBlob(blob, `${filename}.md`)
+  } else if (format === 'docx' || format === 'pdf') {
+    // 调用后端 API 进行转换
+    try {
+      const response = await api.post('/documents/export', {
+        content: documentContent.value,
+        format: format,
+        filename: filename
+      }, {
+        responseType: 'blob'
+      })
+
+      const contentType = format === 'docx'
+        ? 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+        : 'application/pdf'
+      const blob = new Blob([response.data], { type: contentType })
+      downloadBlob(blob, `${filename}.${format}`)
+    } catch (e) {
+      console.error('Export failed:', e)
+      alert(`Export to ${format.toUpperCase()} failed. Please try again.`)
+    }
+  }
+}
+
+const downloadBlob = (blob, filename) => {
+  const url = URL.createObjectURL(blob)
+  const a = window.document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+const handleClickOutside = (event) => {
+  if (exportDropdown.value && !exportDropdown.value.contains(event.target)) {
+    showExportMenu.value = false
   }
 }
 
@@ -375,6 +450,11 @@ watch(messages, () => {
 onMounted(async () => {
   await fetchSkill()
   await startConversation()
+  document.addEventListener('click', handleClickOutside)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 

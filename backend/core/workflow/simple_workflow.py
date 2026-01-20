@@ -264,6 +264,7 @@ class SimpleWorkflow:
                     "type": "section_start",
                     "section_id": section.id,
                     "section_title": section.title,
+                    "section_level": section.level,
                     "section_index": i + 1,
                     "total_sections": len(flat_sections),
                 }
