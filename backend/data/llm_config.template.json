@@ -1,0 +1,11 @@
+{
+  "provider": "github_copilot",
+  "api_key": "",
+  "base_url": "https://api.githubcopilot.com",
+  "model": "gpt-4o",
+  "temperature": 0.3,
+  "max_tokens": 4096,
+  "github_token": "",
+  "github_user": "",
+  "provider_name": "GitHub Copilot"
+}
