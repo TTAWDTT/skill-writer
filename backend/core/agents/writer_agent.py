@@ -18,6 +18,7 @@ class WritingState:
     current_section: Optional[str] = None
     completed_sections: List[str] = field(default_factory=list)
     total_sections: int = 0
+    external_information: str = ""  # 从上传文件提取的外部信息
 
 
 class WriterAgent(BaseAgent):
@@ -39,6 +40,7 @@ class WriterAgent(BaseAgent):
         requirements: Dict[str, Any],
         section_id: Optional[str] = None,
         state: Optional[WritingState] = None,
+        external_information: str = "",
     ) -> Dict[str, Any]:
         """
         执行写作任务
@@ -48,6 +50,7 @@ class WriterAgent(BaseAgent):
             requirements: 用户需求
             section_id: 要写的章节 ID（如果为 None，则写全部）
             state: 写作状态
+            external_information: 从上传文件提取的外部信息
 
         Returns:
             {
@@ -61,7 +64,8 @@ class WriterAgent(BaseAgent):
             state = WritingState(
                 skill_id=skill.metadata.id,
                 requirements=requirements,
-                total_sections=len(flat_sections)
+                total_sections=len(flat_sections),
+                external_information=external_information,
             )
 
         if section_id:
@@ -184,7 +188,10 @@ class WriterAgent(BaseAgent):
         state: WritingState
     ) -> Dict[str, Any]:
         """构建写作上下文"""
-        context = {"requirements": requirements}
+        context = {
+            "requirements": requirements,
+            "external_information": state.external_information,
+        }
 
         # 添加已写内容作为参考
         if state.sections:

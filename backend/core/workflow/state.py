@@ -2,9 +2,19 @@
 会话状态定义
 独立文件以避免循环导入
 """
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 from dataclasses import dataclass, field, asdict
 from datetime import datetime
+
+
+@dataclass
+class UploadedFile:
+    """上传的文件信息"""
+    filename: str
+    content_type: str
+    content: str  # 解析后的文本内容
+    extracted_info: Dict = field(default_factory=dict)  # LLM 提取的信息
+    uploaded_at: str = field(default_factory=lambda: datetime.now().isoformat())
 
 
 @dataclass
@@ -31,6 +41,12 @@ class SessionState:
     # 对话历史
     messages: list = field(default_factory=list)
 
+    # 上传的文件列表
+    uploaded_files: List[Dict] = field(default_factory=list)
+
+    # 外部信息 - 从文件中提取的额外有价值信息
+    external_information: str = ""
+
     # 时间戳
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())
@@ -50,3 +66,16 @@ class SessionState:
     def update_timestamp(self):
         """更新时间戳"""
         self.updated_at = datetime.now().isoformat()
+
+    def add_uploaded_file(self, file_info: Dict):
+        """添加上传的文件"""
+        self.uploaded_files.append(file_info)
+        self.update_timestamp()
+
+    def append_external_info(self, info: str):
+        """追加外部信息"""
+        if self.external_information:
+            self.external_information += "\n\n---\n\n" + info
+        else:
+            self.external_information = info
+        self.update_timestamp()

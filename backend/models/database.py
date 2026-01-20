@@ -30,6 +30,12 @@ class Session(Base):
     review_results = Column(Text, default="{}")  # JSON
     messages = Column(Text, default="[]")  # JSON
 
+    # 上传的文件信息
+    uploaded_files = Column(Text, default="[]")  # JSON
+
+    # 外部信息 - 从文件中提取的额外有价值信息
+    external_information = Column(Text, default="")
+
     # 文档
     final_document = Column(Text, nullable=True)
 
@@ -52,6 +58,8 @@ class Session(Base):
             "sections": json.loads(self.sections) if self.sections else {},
             "review_results": json.loads(self.review_results) if self.review_results else {},
             "messages": json.loads(self.messages) if self.messages else [],
+            "uploaded_files": json.loads(self.uploaded_files) if self.uploaded_files else [],
+            "external_information": self.external_information or "",
             "final_document": self.final_document,
             "error": self.error,
             "created_at": self.created_at.isoformat() if self.created_at else None,

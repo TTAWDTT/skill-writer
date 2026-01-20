@@ -2,14 +2,25 @@
 Chat API 路由
 处理与工作流的交互对话，支持流式输出
 """
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
+from pathlib import Path
 import json
 
 from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
+from backend.core.agents.file_extractor import (
+    parse_uploaded_file,
+    extract_info_from_multiple_files,
+)
+
+try:
+    import multipart  # noqa: F401
+    MULTIPART_AVAILABLE = True
+except Exception:
+    MULTIPART_AVAILABLE = False
 
 router = APIRouter()
 
@@ -32,6 +43,18 @@ class SessionResponse(BaseModel):
     message: str
     is_complete: bool
     document: Optional[str] = None
+
+
+class UploadFilePayload(BaseModel):
+    """JSON 上传文件"""
+    filename: str
+    content_base64: str
+    content_type: Optional[str] = None
+
+
+class UploadFilesRequest(BaseModel):
+    """JSON 上传请求"""
+    files: List[UploadFilePayload]
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -201,4 +224,389 @@ async def get_session_document(session_id: str):
         "session_id": session.session_id,
         "document": session.final_document,
         "sections": session.sections,
+    }
+
+def _build_skill_fields(skill) -> List[dict]:
+    required_fields = [f for f in skill.requirement_fields if f.required]
+    target_fields = required_fields if required_fields else skill.requirement_fields
+    return [
+        {
+            "id": f.id,
+            "name": f.name,
+            "description": f.description,
+        }
+        for f in target_fields
+    ]
+
+
+async def _handle_parsed_upload(
+    session,
+    skill,
+    workflow,
+    parsed_files: List[dict],
+    file_summaries: List[str],
+):
+    if not parsed_files:
+        return {
+            "success": False,
+            "session_id": session.session_id,
+            "message": "没有成功解析任何文件",
+            "file_results": file_summaries,
+            "extracted_fields": {},
+            "external_information": "",
+        }
+
+    skill_fields = _build_skill_fields(skill)
+
+    extraction_result = await extract_info_from_multiple_files(
+        files=parsed_files,
+        skill_fields=skill_fields,
+        skill_name=skill.metadata.name,
+        existing_requirements=session.requirements,
+    )
+
+    # 更新会话状态
+    for pf in parsed_files:
+        session.add_uploaded_file({
+            "filename": pf["filename"],
+            "content_type": pf.get("content_type", ""),
+            "size": pf.get("size", 0),
+            "extracted_fields": extraction_result.get("extracted_fields", {}),
+        })
+
+    # 追加外部信息
+    external_info = extraction_result.get("external_information", "")
+    if external_info:
+        session.append_external_info(external_info)
+
+    # 将提取的字段合并到需求中
+    extracted_fields = extraction_result.get("extracted_fields", {})
+    if extracted_fields:
+        if session.requirements is None:
+            session.requirements = {}
+        for field_id, value in extracted_fields.items():
+            if value is None:
+                continue
+            if isinstance(value, str) and not value.strip():
+                continue
+            existing_value = session.requirements.get(field_id)
+            if existing_value is None or (isinstance(existing_value, str) and not existing_value.strip()):
+                session.requirements[field_id] = value
+
+    # 保存会话
+    workflow.save_session(session)
+
+    # 添加系统消息到对话历史
+    upload_message = f"📎 已上传 {len(parsed_files)} 个文件并提取信息：\n" + "\n".join(file_summaries)
+    session.messages.append({
+        "role": "system",
+        "content": upload_message,
+    })
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session.session_id,
+        "message": f"成功处理 {len(parsed_files)} 个文件",
+        "file_results": file_summaries,
+        "extracted_fields": extracted_fields,
+        "external_information": external_info[:500] + "..." if len(external_info) > 500 else external_info,
+        "summaries": extraction_result.get("summaries", ""),
+    }
+
+
+@router.post("/session/{session_id}/upload-json")
+async def upload_files_json(
+    session_id: str,
+    payload: UploadFilesRequest,
+):
+    """
+    上传文件到会话
+
+    - 支持上传多个文件
+    - 自动解析文件内容并使用 LLM 提取相关信息
+    - 返回提取的信息摘要
+    """
+    # 验证会话存在
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    if session.phase not in ["init", "requirement"]:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot upload files in phase: {session.phase}. Only allowed during requirement collection."
+        )
+
+    # 获取 Skill 信息
+    registry = get_registry()
+    skill = registry.get(session.skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+    # 支持的文件类型
+    allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf'}
+
+    # 解析所有上传的文件
+    parsed_files = []
+    file_summaries = []
+
+    for file in payload.files:
+        file_ext = Path(file.filename).suffix.lower()
+
+        if file_ext not in allowed_extensions:
+            file_summaries.append(f"❌ {file.filename}: 不支持的文件类型 ({file_ext})")
+            continue
+
+        try:
+            import base64
+            content = base64.b64decode(file.content_base64)
+            text_content = parse_uploaded_file(content, file_ext, file.filename)
+
+            if text_content:
+                parsed_files.append({
+                    "filename": file.filename,
+                    "content": text_content,
+                    "content_type": file.content_type or "",
+                    "size": len(content),
+                })
+                file_summaries.append(f"✅ {file.filename}: 解析成功 ({len(text_content)} 字符)")
+            else:
+                file_summaries.append(f"⚠️ {file.filename}: 文件为空或无法解析")
+
+        except Exception as e:
+            file_summaries.append(f"❌ {file.filename}: 解析失败 - {str(e)}")
+
+    try:
+        return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
+    except Exception as e:
+        import traceback
+        print(f"[File Upload Error] {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"文件信息提取失败: {str(e)}"
+        )
+
+
+if MULTIPART_AVAILABLE:
+    @router.post("/session/{session_id}/upload")
+    async def upload_files(
+        session_id: str,
+        files: List[UploadFile] = File(...),
+    ):
+        """
+        上传文件到会话
+
+        - 支持上传多个文件
+        - 自动解析文件内容并使用 LLM 提取相关信息
+        - 返回提取的信息摘要
+        """
+        # 验证会话存在
+        workflow = get_workflow()
+        session = workflow.get_session(session_id)
+
+        if not session:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+        if session.phase not in ["init", "requirement"]:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot upload files in phase: {session.phase}. Only allowed during requirement collection."
+            )
+
+        # 获取 Skill 信息
+        registry = get_registry()
+        skill = registry.get(session.skill_id)
+
+        if not skill:
+            raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+        # 支持的文件类型
+        allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf'}
+
+        # 解析所有上传的文件
+        parsed_files = []
+        file_summaries = []
+
+        for file in files:
+            file_ext = Path(file.filename).suffix.lower()
+
+            if file_ext not in allowed_extensions:
+                file_summaries.append(f"❌ {file.filename}: 不支持的文件类型 ({file_ext})")
+                continue
+
+            try:
+                content = await file.read()
+                text_content = parse_uploaded_file(content, file_ext, file.filename)
+
+                if text_content:
+                    parsed_files.append({
+                        "filename": file.filename,
+                        "content": text_content,
+                        "content_type": file.content_type,
+                        "size": len(content),
+                    })
+                    file_summaries.append(f"✅ {file.filename}: 解析成功 ({len(text_content)} 字符)")
+                else:
+                    file_summaries.append(f"⚠️ {file.filename}: 文件为空或无法解析")
+
+            except Exception as e:
+                file_summaries.append(f"❌ {file.filename}: 解析失败 - {str(e)}")
+
+        try:
+            return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
+        except Exception as e:
+            import traceback
+            print(f"[File Upload Error] {traceback.format_exc()}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"文件信息提取失败: {str(e)}"
+            )
+
+
+@router.get("/session/{session_id}/files")
+async def get_session_files(session_id: str):
+    """获取会话上传的文件列表"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    return {
+        "session_id": session.session_id,
+        "files": session.uploaded_files,
+        "external_information": session.external_information,
+    }
+
+
+class UpdateRequirementsRequest(BaseModel):
+    """更新需求请求"""
+    requirements: dict
+
+
+@router.put("/session/{session_id}/requirements")
+async def update_requirements(session_id: str, request: UpdateRequirementsRequest):
+    """
+    直接更新会话的需求字段
+
+    - 用于表单直接编辑需求
+    - 不需要通过对话收集
+    """
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    # 更新需求
+    if session.requirements is None:
+        session.requirements = {}
+
+    # 合并新的需求（保留已有值，除非明确覆盖）
+    for key, value in request.requirements.items():
+        if value is None:
+            session.requirements.pop(key, None)
+            continue
+        if isinstance(value, str) and not value.strip():
+            session.requirements.pop(key, None)
+            continue
+        session.requirements[key] = value
+
+    # 保存会话
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "requirements": session.requirements,
+    }
+
+
+@router.get("/session/{session_id}/requirements")
+async def get_requirements(session_id: str):
+    """获取会话的需求字段"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    # 获取 Skill 的字段定义
+    registry = get_registry()
+    skill = registry.get(session.skill_id)
+
+    fields = []
+    if skill:
+        fields = [
+            {
+                "id": f.id,
+                "name": f.name,
+                "description": f.description,
+                "type": f.field_type,
+                "required": f.required,
+                "placeholder": f.placeholder,
+            }
+            for f in skill.requirement_fields
+        ]
+
+    return {
+        "session_id": session_id,
+        "requirements": session.requirements or {},
+        "fields": fields,
+        "external_information": session.external_information,
+    }
+
+
+@router.post("/session/{session_id}/start-generation")
+async def start_generation(session_id: str):
+    """
+    开始文档生成
+
+    - 检查必填字段是否已填写
+    - 将阶段切换到 writing
+    """
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    # 获取 Skill 的字段定义
+    registry = get_registry()
+    skill = registry.get(session.skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+    # 检查必填字段
+    missing_fields = []
+    requirements = session.requirements or {}
+
+    for field in skill.requirement_fields:
+        if field.required:
+            value = requirements.get(field.id)
+            if not value or (isinstance(value, str) and not value.strip()):
+                missing_fields.append(field.name)
+
+    if missing_fields:
+        return {
+            "success": False,
+            "session_id": session_id,
+            "message": f"请填写以下必填字段: {', '.join(missing_fields)}",
+            "missing_fields": missing_fields,
+        }
+
+    # 切换到写作阶段
+    session.phase = "writing"
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "phase": "writing",
+        "message": "开始生成文档...",
     }

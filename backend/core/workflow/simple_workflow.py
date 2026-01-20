@@ -69,6 +69,10 @@ class SimpleWorkflow:
         """获取会话"""
         return self.store.get(session_id)
 
+    def save_session(self, session: SessionState):
+        """保存会话"""
+        self.store.save(session)
+
     async def start_session(self, skill_id: str) -> Dict[str, Any]:
         """
         开始新会话，返回初始问候语
@@ -204,6 +208,7 @@ class SimpleWorkflow:
             result = await self.writer_agent.run(
                 skill=skill,
                 requirements=session.requirements,
+                external_information=session.external_information,
             )
 
             session.writing_state = asdict(result["state"])
@@ -273,6 +278,7 @@ class SimpleWorkflow:
                 context = {
                     "requirements": session.requirements,
                     "written_sections": session.sections,
+                    "external_information": session.external_information,
                 }
 
                 # 获取章节 prompt

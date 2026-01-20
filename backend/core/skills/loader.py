@@ -251,13 +251,14 @@ class FileBasedSkill(BaseSkill):
 
         Args:
             section: 章节定义
-            context: 上下文信息（包含用户需求、已写内容等）
+            context: 上下文信息（包含用户需求、已写内容、外部信息等）
 
         Returns:
             用于 LLM 的写作 prompt
         """
         requirements = context.get('requirements', {})
         written_sections = context.get('written_sections', {})
+        external_information = context.get('external_information', '')
 
         # 构建模板变量
         template_vars = {
@@ -268,6 +269,7 @@ class FileBasedSkill(BaseSkill):
             'section_word_limit': f"{section.word_limit[0]}-{section.word_limit[1]}字" if section.word_limit and len(section.word_limit) >= 2 else "无限制",
             'section_evaluation_points': '\n'.join(f"- {p}" for p in section.evaluation_points) if section.evaluation_points else "无",
             'written_sections': written_sections,
+            'external_information': external_information,
             **requirements,  # 展开所有用户需求字段
         }
 
@@ -282,6 +284,16 @@ class FileBasedSkill(BaseSkill):
     def _get_fallback_prompt(self, section: Section, context: Dict[str, Any]) -> str:
         """备用 prompt 生成"""
         requirements = context.get('requirements', {})
+        external_information = context.get('external_information', '')
+
+        external_info_section = ""
+        if external_information:
+            external_info_section = f"""
+## 参考材料
+以下是从用户上传材料中提取的有价值信息，请在写作时适当参考：
+
+{external_information}
+"""
 
         return f"""请撰写"{section.title}"部分。
 
@@ -291,7 +303,7 @@ class FileBasedSkill(BaseSkill):
 - 研究问题：{requirements.get('research_problem', '未提供')}
 - 研究方法：{requirements.get('research_method', '未提供')}
 - 创新点：{requirements.get('innovation_points', '未提供')}
-
+{external_info_section}
 ## 章节要求
 {section.description}
 
