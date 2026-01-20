@@ -85,7 +85,25 @@ PROVIDER_PRESETS = {
         "provider_name": "GitHub Copilot",
         "base_url": "https://api.githubcopilot.com",
         "model": "gpt-4o",
-        "models": ["gpt-4o", "gpt-4o-mini", "claude-3.5-sonnet", "o1-mini", "o1-preview"],
+        "models": [
+            # OpenAI models
+            "gpt-4o",
+            "gpt-4o-mini",
+            "gpt-4.1",
+            "gpt-4.1-mini",
+            "gpt-4.1-nano",
+            "o1",
+            "o1-mini",
+            "o1-preview",
+            "o3-mini",
+            # Anthropic models
+            "claude-3.5-sonnet",
+            "claude-3.5-haiku",
+            "claude-sonnet-4",
+            # Google models
+            "gemini-2.0-flash",
+            "gemini-2.5-pro",
+        ],
         "requires_oauth": True,
     },
 }

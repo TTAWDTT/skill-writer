@@ -1,7 +1,7 @@
 <template>
   <div class="flex h-[calc(100vh-140px)] gap-6">
     <!-- Left: Chat Panel -->
-    <div class="flex-1 flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden">
+    <div class="flex-1 flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden gpu-accelerate">
       <!-- Chat Header -->
       <div class="px-6 py-4 border-b border-warm-300 bg-warm-100">
         <div class="flex items-center gap-3">
@@ -21,49 +21,55 @@
       </div>
 
       <!-- Messages -->
-      <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4">
-        <div
-          v-for="(msg, index) in messages"
-          :key="index"
-          :class="[
-            'max-w-[85%] p-4 rounded-2xl',
-            msg.role === 'user'
-              ? 'ml-auto bg-anthropic-orange text-white shadow-sm'
-              : 'bg-warm-200 text-dark-300 border border-warm-300'
-          ]"
-        >
-          <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</div>
-        </div>
+      <div ref="messagesContainer" class="flex-1 overflow-y-auto p-6 space-y-4 scroll-smooth">
+        <TransitionGroup name="message" tag="div" class="space-y-4">
+          <div
+            v-for="(msg, index) in messages"
+            :key="`msg-${index}-${msg.role}`"
+            :class="[
+              'max-w-[85%] p-4 rounded-2xl message-bubble gpu-accelerate',
+              msg.role === 'user'
+                ? 'ml-auto bg-anthropic-orange text-white shadow-sm'
+                : 'bg-warm-200 text-dark-300 border border-warm-300'
+            ]"
+          >
+            <div class="whitespace-pre-wrap text-sm leading-relaxed">{{ msg.content }}</div>
+          </div>
+        </TransitionGroup>
 
         <!-- Typing indicator -->
-        <div v-if="isTyping" class="bg-warm-200 text-dark-300 max-w-[85%] p-4 rounded-2xl border border-warm-300">
-          <span class="inline-flex space-x-1.5">
-            <span class="w-2 h-2 bg-anthropic-orange rounded-full animate-bounce"></span>
-            <span class="w-2 h-2 bg-anthropic-orange rounded-full animate-bounce" style="animation-delay: 0.1s"></span>
-            <span class="w-2 h-2 bg-anthropic-orange rounded-full animate-bounce" style="animation-delay: 0.2s"></span>
-          </span>
-        </div>
+        <Transition name="fade">
+          <div v-if="isTyping" class="bg-warm-200 text-dark-300 max-w-[85%] p-4 rounded-2xl border border-warm-300">
+            <span class="inline-flex space-x-1.5">
+              <span class="w-2 h-2 bg-anthropic-orange rounded-full typing-dot"></span>
+              <span class="w-2 h-2 bg-anthropic-orange rounded-full typing-dot" style="animation-delay: 0.15s"></span>
+              <span class="w-2 h-2 bg-anthropic-orange rounded-full typing-dot" style="animation-delay: 0.3s"></span>
+            </span>
+          </div>
+        </Transition>
 
         <!-- Writing progress -->
-        <div v-if="isWriting" class="bg-warm-200 border border-anthropic-orange-light text-dark-300 p-5 rounded-2xl">
-          <div class="flex items-center gap-3 mb-3">
-            <div class="w-5 h-5 border-2 border-warm-300 border-t-anthropic-orange rounded-full animate-spin"></div>
-            <span class="font-medium text-dark-300">Generating document...</span>
-          </div>
-          <div v-if="writingProgress.total > 0" class="text-sm">
-            <div class="flex justify-between mb-2 text-dark-50">
-              <span>{{ writingProgress.current }} / {{ writingProgress.total }} sections</span>
-              <span>{{ Math.round(writingProgress.current / writingProgress.total * 100) }}%</span>
+        <Transition name="fade">
+          <div v-if="isWriting" class="bg-warm-200 border border-anthropic-orange-light text-dark-300 p-5 rounded-2xl">
+            <div class="flex items-center gap-3 mb-3">
+              <div class="w-5 h-5 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner gpu-accelerate"></div>
+              <span class="font-medium text-dark-300">Generating document...</span>
             </div>
-            <div class="w-full bg-warm-300 rounded-full h-2">
-              <div
-                class="bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark h-2 rounded-full transition-all duration-300"
-                :style="{ width: (writingProgress.current / writingProgress.total * 100) + '%' }"
-              ></div>
+            <div v-if="writingProgress.total > 0" class="text-sm">
+              <div class="flex justify-between mb-2 text-dark-50">
+                <span>{{ writingProgress.current }} / {{ writingProgress.total }} sections</span>
+                <span>{{ progressPercent }}%</span>
+              </div>
+              <div class="w-full bg-warm-300 rounded-full h-2 overflow-hidden">
+                <div
+                  class="bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark h-2 rounded-full progress-bar gpu-accelerate"
+                  :style="{ width: progressPercent + '%' }"
+                ></div>
+              </div>
+              <p v-if="currentSection" class="mt-3 text-xs text-dark-50">Current: {{ currentSection }}</p>
             </div>
-            <p v-if="currentSection" class="mt-3 text-xs text-dark-50">Current: {{ currentSection }}</p>
           </div>
-        </div>
+        </Transition>
       </div>
 
       <!-- Input -->
@@ -75,12 +81,12 @@
             :disabled="isTyping || isWriting || isComplete"
             type="text"
             placeholder="Type your response..."
-            class="flex-1 px-5 py-3 bg-warm-50 border border-warm-300 rounded-xl text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent disabled:bg-warm-200 disabled:text-warm-400 transition-all"
+            class="flex-1 px-5 py-3 bg-warm-50 border border-warm-300 rounded-xl text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent disabled:bg-warm-200 disabled:text-warm-400 transition-all duration-200"
           />
           <button
             @click="sendMessage"
             :disabled="!inputMessage.trim() || isTyping || isWriting || isComplete"
-            class="px-6 py-3 bg-anthropic-orange text-white rounded-xl font-medium hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-400 disabled:cursor-not-allowed transition-colors shadow-sm hover:shadow-md"
+            class="px-6 py-3 bg-anthropic-orange text-white rounded-xl font-medium hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-400 disabled:cursor-not-allowed transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
           >
             Send
           </button>
@@ -89,7 +95,7 @@
     </div>
 
     <!-- Right: Document Preview -->
-    <div class="w-[45%] flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden">
+    <div class="w-[45%] flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden gpu-accelerate">
       <!-- Preview Header -->
       <div class="px-6 py-4 border-b border-warm-300 bg-warm-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
@@ -100,83 +106,90 @@
           </div>
           <h3 class="font-semibold text-dark-300">Document Preview</h3>
         </div>
-        <div v-if="documentContent" class="flex gap-2">
-          <button
-            @click="copyDocument"
-            class="px-3 py-2 text-sm bg-warm-200 text-dark-100 rounded-xl hover:bg-warm-300 transition-colors font-medium"
-          >
-            Copy
-          </button>
-          <div class="relative" ref="exportDropdown">
+        <Transition name="fade">
+          <div v-if="documentContent" class="flex gap-2">
             <button
-              @click="showExportMenu = !showExportMenu"
-              class="px-3 py-2 text-sm bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-orange-dark transition-colors font-medium shadow-sm flex items-center gap-1"
+              @click="copyDocument"
+              class="px-3 py-2 text-sm bg-warm-200 text-dark-100 rounded-xl hover:bg-warm-300 transition-all duration-200 font-medium active:scale-95"
             >
-              Export
-              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-              </svg>
+              {{ copyButtonText }}
             </button>
-            <div
-              v-if="showExportMenu"
-              class="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-warm-300 py-2 z-10"
-            >
+            <div class="relative" ref="exportDropdown">
               <button
-                @click="exportAs('md')"
-                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
+                @click="showExportMenu = !showExportMenu"
+                class="px-3 py-2 text-sm bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-orange-dark transition-all duration-200 font-medium shadow-sm flex items-center gap-1 active:scale-95"
               >
-                <span class="w-6 text-center text-xs font-mono bg-warm-200 rounded px-1">MD</span>
-                Markdown
+                Export
+                <svg class="w-4 h-4 transition-transform duration-200" :class="{ 'rotate-180': showExportMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+                </svg>
               </button>
-              <button
-                @click="exportAs('docx')"
-                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
-              >
-                <span class="w-6 text-center text-xs font-mono bg-blue-100 text-blue-700 rounded px-1">W</span>
-                Word (.docx)
-              </button>
-              <button
-                @click="exportAs('pdf')"
-                class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2"
-              >
-                <span class="w-6 text-center text-xs font-mono bg-red-100 text-red-700 rounded px-1">PDF</span>
-                PDF
-              </button>
+              <Transition name="dropdown">
+                <div
+                  v-if="showExportMenu"
+                  class="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-warm-300 py-2 z-10"
+                >
+                  <button
+                    @click="exportAs('md')"
+                    class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2 transition-colors duration-150"
+                  >
+                    <span class="w-6 text-center text-xs font-mono bg-warm-200 rounded px-1">MD</span>
+                    Markdown
+                  </button>
+                  <button
+                    @click="exportAs('docx')"
+                    class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2 transition-colors duration-150"
+                  >
+                    <span class="w-6 text-center text-xs font-mono bg-blue-100 text-blue-700 rounded px-1">W</span>
+                    Word (.docx)
+                  </button>
+                  <button
+                    @click="exportAs('pdf')"
+                    class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-2 transition-colors duration-150"
+                  >
+                    <span class="w-6 text-center text-xs font-mono bg-red-100 text-red-700 rounded px-1">PDF</span>
+                    PDF
+                  </button>
+                </div>
+              </Transition>
             </div>
           </div>
-        </div>
+        </Transition>
       </div>
 
       <!-- Preview Content -->
-      <div class="flex-1 overflow-y-auto p-6">
-        <div v-if="documentContent" class="markdown-content prose prose-warm max-w-none" v-html="renderedDocument"></div>
-        <div v-else-if="isWriting" class="h-full flex items-center justify-center">
-          <div class="text-center">
-            <div class="w-12 h-12 border-3 border-warm-300 border-t-anthropic-orange rounded-full animate-spin mx-auto"></div>
-            <p class="mt-4 text-dark-50 font-medium">Generating document...</p>
-          </div>
-        </div>
-        <div v-else class="h-full flex items-center justify-center">
-          <div class="text-center">
-            <div class="w-16 h-16 bg-warm-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <svg class="w-8 h-8 text-warm-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+      <div class="flex-1 overflow-y-auto p-6 scroll-smooth">
+        <Transition name="fade" mode="out-in">
+          <div v-if="documentContent" key="content" class="markdown-content prose prose-warm max-w-none" v-html="renderedDocumentDebounced"></div>
+          <div v-else-if="isWriting" key="writing" class="h-full flex items-center justify-center">
+            <div class="text-center">
+              <div class="w-12 h-12 border-3 border-warm-300 border-t-anthropic-orange rounded-full spinner gpu-accelerate mx-auto"></div>
+              <p class="mt-4 text-dark-50 font-medium">Generating document...</p>
             </div>
-            <p class="text-dark-100 font-medium">Document Preview</p>
-            <p class="text-sm text-warm-400 mt-1">Complete the conversation to generate your document</p>
           </div>
-        </div>
+          <div v-else key="empty" class="h-full flex items-center justify-center">
+            <div class="text-center">
+              <div class="w-16 h-16 bg-warm-200 rounded-2xl flex items-center justify-center mx-auto mb-4">
+                <svg class="w-8 h-8 text-warm-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                </svg>
+              </div>
+              <p class="text-dark-100 font-medium">Document Preview</p>
+              <p class="text-sm text-warm-400 mt-1">Complete the conversation to generate your document</p>
+            </div>
+          </div>
+        </Transition>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, shallowRef } from 'vue'
 import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { api } from '../api'
+import { debounce, scrollToBottom as rafScrollToBottom } from '../utils/performance'
 
 const route = useRoute()
 const skillId = computed(() => route.params.skillId)
@@ -197,6 +210,25 @@ const writingProgress = ref({ current: 0, total: 0 })
 const showExportMenu = ref(false)
 const exportDropdown = ref(null)
 const currentSectionLevel = ref(1)
+const copyButtonText = ref('Copy')
+
+// Store EventSource reference for cleanup
+const eventSourceRef = shallowRef(null)
+
+// Debounced rendered document to avoid expensive markdown parsing on every keystroke
+const renderedDocumentDebounced = ref('')
+const updateRenderedDocument = debounce((content) => {
+  if (!content) {
+    renderedDocumentDebounced.value = ''
+    return
+  }
+  renderedDocumentDebounced.value = marked(content)
+}, 150)
+
+// Watch documentContent and update rendered version with debounce
+watch(documentContent, (newContent) => {
+  updateRenderedDocument(newContent)
+}, { immediate: true })
 
 // Computed
 const phaseText = computed(() => {
@@ -211,9 +243,9 @@ const phaseText = computed(() => {
   return phases[phase.value] || phase.value
 })
 
-const renderedDocument = computed(() => {
-  if (!documentContent.value) return ''
-  return marked(documentContent.value)
+const progressPercent = computed(() => {
+  if (writingProgress.value.total === 0) return 0
+  return Math.round(writingProgress.value.current / writingProgress.value.total * 100)
 })
 
 // Methods
@@ -251,9 +283,13 @@ const startConversation = async () => {
   }
 }
 
+// Debounced send to prevent rapid double-sends
+let sendingMessage = false
 const sendMessage = async () => {
   const message = inputMessage.value.trim()
-  if (!message || isTyping.value || isWriting.value) return
+  if (!message || isTyping.value || isWriting.value || sendingMessage) return
+
+  sendingMessage = true
 
   // Add user message
   messages.value.push({
@@ -264,7 +300,7 @@ const sendMessage = async () => {
   isTyping.value = true
 
   await nextTick()
-  scrollToBottom()
+  rafScrollToBottom(messagesContainer.value)
 
   try {
     const response = await api.post('/chat/message', {
@@ -297,8 +333,9 @@ const sendMessage = async () => {
     })
   } finally {
     isTyping.value = false
+    sendingMessage = false
     await nextTick()
-    scrollToBottom()
+    rafScrollToBottom(messagesContainer.value)
   }
 }
 
@@ -309,6 +346,7 @@ const startStreamGeneration = async () => {
 
   try {
     const eventSource = new EventSource(`/api/chat/generate/${sessionId.value}/stream`)
+    eventSourceRef.value = eventSource
 
     eventSource.onmessage = (event) => {
       const data = JSON.parse(event.data)
@@ -344,7 +382,7 @@ const startStreamGeneration = async () => {
           phase.value = 'complete'
           currentSection.value = ''
           documentContent.value = data.document
-          eventSource.close()
+          closeEventSource()
 
           messages.value.push({
             role: 'assistant',
@@ -355,7 +393,7 @@ const startStreamGeneration = async () => {
         case 'error':
           isWriting.value = false
           phase.value = 'error'
-          eventSource.close()
+          closeEventSource()
           messages.value.push({
             role: 'assistant',
             content: `Generation failed: ${data.error}`
@@ -367,7 +405,7 @@ const startStreamGeneration = async () => {
     eventSource.onerror = (e) => {
       console.error('SSE error:', e)
       isWriting.value = false
-      eventSource.close()
+      closeEventSource()
     }
 
   } catch (e) {
@@ -380,16 +418,21 @@ const startStreamGeneration = async () => {
   }
 }
 
-const scrollToBottom = () => {
-  if (messagesContainer.value) {
-    messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight
+// Clean up EventSource
+const closeEventSource = () => {
+  if (eventSourceRef.value) {
+    eventSourceRef.value.close()
+    eventSourceRef.value = null
   }
 }
 
-const copyDocument = () => {
+const copyDocument = async () => {
   if (documentContent.value) {
-    navigator.clipboard.writeText(documentContent.value)
-    alert('Copied to clipboard')
+    await navigator.clipboard.writeText(documentContent.value)
+    copyButtonText.value = 'Copied!'
+    setTimeout(() => {
+      copyButtonText.value = 'Copy'
+    }, 2000)
   }
 }
 
@@ -456,10 +499,10 @@ const handleClickOutside = (event) => {
   }
 }
 
-// Watch for message changes to auto-scroll
-watch(messages, () => {
-  nextTick(() => scrollToBottom())
-}, { deep: true })
+// Watch for message count changes to auto-scroll (optimized: only watch length, not deep)
+watch(() => messages.value.length, () => {
+  nextTick(() => rafScrollToBottom(messagesContainer.value))
+})
 
 // Lifecycle
 onMounted(async () => {
@@ -470,12 +513,133 @@ onMounted(async () => {
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  // Clean up EventSource to prevent memory leaks
+  closeEventSource()
 })
 </script>
 
 <style scoped>
+/* GPU Acceleration */
+.gpu-accelerate {
+  transform: translateZ(0);
+  will-change: transform;
+  backface-visibility: hidden;
+}
+
 .border-3 {
   border-width: 3px;
+}
+
+/* Optimized spinner animation */
+.spinner {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* Typing dots animation */
+.typing-dot {
+  animation: typing-bounce 1.2s ease-in-out infinite;
+}
+
+@keyframes typing-bounce {
+  0%, 60%, 100% { transform: translateY(0); }
+  30% { transform: translateY(-6px); }
+}
+
+/* Progress bar animation */
+.progress-bar {
+  transition: width 0.3s ease-out;
+}
+
+/* Message animations */
+.message-enter-active {
+  animation: message-in 0.25s ease-out;
+}
+
+.message-leave-active {
+  animation: message-out 0.2s ease-in;
+}
+
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes message-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* Fade transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.2s ease;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Dropdown transition */
+.dropdown-enter-active {
+  animation: dropdown-in 0.15s ease-out;
+}
+
+.dropdown-leave-active {
+  animation: dropdown-out 0.1s ease-in;
+}
+
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes dropdown-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+}
+
+/* Smooth scrolling */
+.scroll-smooth {
+  scroll-behavior: smooth;
+}
+
+/* Message bubble hover effect */
+.message-bubble {
+  transition: transform 0.15s ease;
+}
+
+.message-bubble:hover {
+  transform: scale(1.01);
 }
 
 .prose-warm {
