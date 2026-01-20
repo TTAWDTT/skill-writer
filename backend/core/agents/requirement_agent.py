@@ -111,11 +111,24 @@ class RequirementAgent(BaseAgent):
 
 为了更好地为您服务，我需要了解一些基本信息。
 
-首先，请告诉我：
-1. **{required_fields[0].name}**：{required_fields[0].description or ''}
 """
-        if len(required_fields) > 1:
-            prompt += f"2. **{required_fields[1].name}**：{required_fields[1].description or ''}\n"
+        # Handle case when there are required fields
+        if required_fields:
+            prompt += "首先，请告诉我：\n"
+            prompt += f"1. **{required_fields[0].name}**：{required_fields[0].description or ''}\n"
+            if len(required_fields) > 1:
+                prompt += f"2. **{required_fields[1].name}**：{required_fields[1].description or ''}\n"
+        elif fields:
+            # If no required fields but there are optional fields
+            prompt += "首先，请告诉我：\n"
+            prompt += f"1. **{fields[0].name}**：{fields[0].description or ''}\n"
+            if len(fields) > 1:
+                prompt += f"2. **{fields[1].name}**：{fields[1].description or ''}\n"
+        else:
+            # No fields at all - ask for general project info
+            prompt += "首先，请简单介绍一下您的项目：\n"
+            prompt += "1. **项目名称**：您的项目叫什么？\n"
+            prompt += "2. **研究内容**：主要研究什么？\n"
 
         prompt += "\n请随时告诉我，我们开始吧！"
         return prompt

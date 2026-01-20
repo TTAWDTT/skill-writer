@@ -465,7 +465,7 @@ const startPolling = () => {
 
   deviceFlow.statusMessage = 'Waiting for authorization...'
 
-  deviceFlow.pollTimer = setInterval(async () => {
+  const poll = async () => {
     try {
       const response = await api.post(`/config/github/device-poll?device_code=${deviceFlow.deviceCode}`)
       const data = response.data
@@ -473,8 +473,10 @@ const startPolling = () => {
       switch (data.status) {
         case 'success':
           // Authorization successful
-          clearInterval(deviceFlow.pollTimer)
-          deviceFlow.pollTimer = null
+          if (deviceFlow.pollTimer) {
+            clearInterval(deviceFlow.pollTimer)
+            deviceFlow.pollTimer = null
+          }
           deviceFlow.started = false
           deviceFlow.userCode = null
 
@@ -493,14 +495,21 @@ const startPolling = () => {
           break
 
         case 'slow_down':
-          // Increase interval
+          // Increase interval and restart timer
           deviceFlow.interval = Math.min(deviceFlow.interval + 5, 30)
-          deviceFlow.statusMessage = 'Slowing down polling...'
+          deviceFlow.statusMessage = `Slowing down polling (${deviceFlow.interval}s)...`
+          // Restart timer with new interval
+          if (deviceFlow.pollTimer) {
+            clearInterval(deviceFlow.pollTimer)
+          }
+          deviceFlow.pollTimer = setInterval(poll, deviceFlow.interval * 1000)
           break
 
         case 'expired':
-          clearInterval(deviceFlow.pollTimer)
-          deviceFlow.pollTimer = null
+          if (deviceFlow.pollTimer) {
+            clearInterval(deviceFlow.pollTimer)
+            deviceFlow.pollTimer = null
+          }
           deviceFlow.started = false
           testResult.value = {
             success: false,
@@ -509,8 +518,10 @@ const startPolling = () => {
           break
 
         case 'denied':
-          clearInterval(deviceFlow.pollTimer)
-          deviceFlow.pollTimer = null
+          if (deviceFlow.pollTimer) {
+            clearInterval(deviceFlow.pollTimer)
+            deviceFlow.pollTimer = null
+          }
           deviceFlow.started = false
           testResult.value = {
             success: false,
@@ -525,7 +536,12 @@ const startPolling = () => {
       console.error('Polling error:', e)
       deviceFlow.statusMessage = 'Error checking status...'
     }
-  }, deviceFlow.interval * 1000)
+  }
+
+  // Start polling
+  deviceFlow.pollTimer = setInterval(poll, deviceFlow.interval * 1000)
+  // Also poll immediately
+  poll()
 }
 
 const cancelDeviceFlow = () => {

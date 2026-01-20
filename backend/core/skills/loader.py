@@ -265,7 +265,7 @@ class FileBasedSkill(BaseSkill):
             'section_id': section.id,
             'section_description': section.description,
             'section_writing_guide': section.writing_guide,
-            'section_word_limit': f"{section.word_limit[0]}-{section.word_limit[1]}字" if section.word_limit else "无限制",
+            'section_word_limit': f"{section.word_limit[0]}-{section.word_limit[1]}字" if section.word_limit and len(section.word_limit) >= 2 else "无限制",
             'section_evaluation_points': '\n'.join(f"- {p}" for p in section.evaluation_points) if section.evaluation_points else "无",
             'written_sections': written_sections,
             **requirements,  # 展开所有用户需求字段
@@ -299,7 +299,7 @@ class FileBasedSkill(BaseSkill):
 {section.writing_guide}
 
 ## 字数要求
-{f"{section.word_limit[0]}-{section.word_limit[1]}字" if section.word_limit else "适当篇幅"}
+{f"{section.word_limit[0]}-{section.word_limit[1]}字" if section.word_limit and len(section.word_limit) >= 2 else "适当篇幅"}
 
 请直接输出该章节的内容。
 """
@@ -320,8 +320,8 @@ class FileBasedSkill(BaseSkill):
 
         # 字数检查
         word_count = len(content)
-        if section.word_limit:
-            min_words, max_words = section.word_limit
+        if section.word_limit and len(section.word_limit) >= 2:
+            min_words, max_words = section.word_limit[0], section.word_limit[1]
             if word_count < min_words:
                 issues.append(f"字数不足：当前 {word_count} 字，要求至少 {min_words} 字")
                 suggestions.append("请扩充内容，增加更多细节和论述")
