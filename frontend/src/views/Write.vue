@@ -421,7 +421,22 @@ const exportAs = async (format) => {
       downloadBlob(blob, `${filename}.${format}`)
     } catch (e) {
       console.error('Export failed:', e)
-      alert(`Export to ${format.toUpperCase()} failed. Please try again.`)
+      // 尝试从 blob 响应中读取错误信息
+      let errorMessage = `Export to ${format.toUpperCase()} failed.`
+      if (e.response?.data instanceof Blob) {
+        try {
+          const text = await e.response.data.text()
+          const errorData = JSON.parse(text)
+          if (errorData.detail) {
+            errorMessage = errorData.detail
+          }
+        } catch {
+          // 忽略解析错误
+        }
+      } else if (e.response?.data?.detail) {
+        errorMessage = e.response.data.detail
+      }
+      alert(errorMessage)
     }
   }
 }

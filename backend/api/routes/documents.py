@@ -359,22 +359,48 @@ async def export_content(request: ExportRequest):
             from fpdf import FPDF
             import re as re_module
 
-            # 创建 PDF
+            # 创建 PDF，设置合理的边距
             pdf = FPDF()
+            pdf.set_margins(15, 15, 15)  # 左、上、右边距
+            pdf.set_auto_page_break(auto=True, margin=15)  # 自动分页，底部边距
             pdf.add_page()
 
             # 添加中文字体支持
             # 尝试使用系统字体
+            font_loaded = False
+            font_name = 'Helvetica'  # FPDF 核心字体
             try:
                 pdf.add_font('SimSun', '', 'C:/Windows/Fonts/simsun.ttc', uni=True)
-                pdf.set_font('SimSun', size=12)
-            except Exception:
+                font_name = 'SimSun'
+                font_loaded = True
+            except Exception as e1:
                 try:
                     pdf.add_font('Microsoft YaHei', '', 'C:/Windows/Fonts/msyh.ttc', uni=True)
-                    pdf.set_font('Microsoft YaHei', size=12)
-                except Exception:
-                    # 回退到默认字体（可能不支持中文）
-                    pdf.set_font('Arial', size=12)
+                    font_name = 'Microsoft YaHei'
+                    font_loaded = True
+                except Exception as e2:
+                    # 尝试其他常见中文字体路径
+                    try:
+                        pdf.add_font('SimHei', '', 'C:/Windows/Fonts/simhei.ttf', uni=True)
+                        font_name = 'SimHei'
+                        font_loaded = True
+                    except Exception:
+                        # 使用 Helvetica 作为最后的后备方案
+                        font_name = 'Helvetica'
+                        font_loaded = False
+
+            pdf.set_font(font_name, size=12)
+
+            # 清理内容中可能导致问题的字符
+            def clean_text(text):
+                """清理可能导致PDF渲染问题的字符"""
+                # 替换一些特殊字符
+                text = text.replace('\r\n', '\n').replace('\r', '\n')
+                # 移除可能导致问题的控制字符
+                text = ''.join(char for char in text if ord(char) >= 32 or char in '\n\t')
+                return text
+
+            content = clean_text(content)
 
             # 解析 Markdown 并添加到 PDF
             lines = content.split('\n')
@@ -385,27 +411,52 @@ async def export_content(request: ExportRequest):
                     pdf.ln(5)
                     continue
 
-                # 处理标题
-                if line.startswith('#'):
-                    level = len(re_module.match(r'^#+', line).group())
-                    title_text = line.lstrip('#').strip()
-                    sizes = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 10}
-                    pdf.set_font_size(sizes.get(level, 12))
-                    pdf.ln(8)
-                    pdf.multi_cell(0, 8, title_text)
-                    pdf.set_font_size(12)
-                    pdf.ln(4)
+                # 如果没有加载中文字体，跳过非ASCII字符的行（避免渲染错误）
+                if not font_loaded:
+                    try:
+                        line.encode('latin-1')
+                    except UnicodeEncodeError:
+                        # 包含非ASCII字符，尝试移除它们
+                        line = ''.join(char for char in line if ord(char) < 128)
+                        if not line.strip():
+                            pdf.ln(3)
+                            continue
 
-                # 处理列表
-                elif line.startswith('- ') or line.startswith('* '):
-                    pdf.multi_cell(0, 6, '  • ' + line[2:])
+                try:
+                    # 处理标题
+                    if line.startswith('#'):
+                        level = len(re_module.match(r'^#+', line).group())
+                        title_text = line.lstrip('#').strip()
+                        if not title_text:
+                            continue
+                        sizes = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 10}
+                        pdf.set_font_size(sizes.get(level, 12))
+                        pdf.ln(6)
+                        pdf.multi_cell(0, 8, title_text)
+                        pdf.set_font_size(12)
+                        pdf.ln(3)
 
-                elif re_module.match(r'^\d+\. ', line):
-                    pdf.multi_cell(0, 6, '  ' + line)
+                    # 处理列表
+                    elif line.startswith('- ') or line.startswith('* '):
+                        list_text = line[2:].strip()
+                        if list_text:
+                            pdf.multi_cell(0, 6, '  - ' + list_text)
 
-                # 普通段落
-                else:
-                    pdf.multi_cell(0, 6, line)
+                    elif re_module.match(r'^\d+\. ', line):
+                        pdf.multi_cell(0, 6, '  ' + line)
+
+                    # 普通段落
+                    else:
+                        pdf.multi_cell(0, 6, line)
+
+                except Exception as line_error:
+                    # 如果单行渲染失败，尝试简化后继续
+                    try:
+                        simple_line = ''.join(char for char in line if ord(char) < 128)
+                        if simple_line.strip():
+                            pdf.multi_cell(0, 6, simple_line)
+                    except:
+                        pass  # 跳过无法渲染的行
 
             # 输出 PDF
             pdf_content = pdf.output()
@@ -422,6 +473,9 @@ async def export_content(request: ExportRequest):
                 detail="PDF export requires fpdf2. Run: pip install fpdf2"
             )
         except Exception as e:
+            import traceback
+            error_detail = f"PDF generation failed: {str(e)}\n{traceback.format_exc()}"
+            print(f"[PDF Export Error] {error_detail}")
             raise HTTPException(
                 status_code=500,
                 detail=f"PDF generation failed: {str(e)}"

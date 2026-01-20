@@ -10,6 +10,33 @@ from backend.core.llm.providers import get_llm_client
 from backend.core.skills.registry import get_registry
 
 
+# 默认的 section prompt Jinja2 模板
+DEFAULT_SECTION_PROMPT_TEMPLATE = """请撰写"{{ section_title }}"部分。
+
+## 章节要求
+{{ section_description }}
+
+## 写作指导
+{{ section_writing_guide }}
+
+## 字数要求
+{{ section_word_limit }}
+
+## 评审要点
+{{ section_evaluation_points }}
+
+{% if written_sections %}
+## 已完成的章节
+{% for sec_id, sec_content in written_sections.items() %}
+### {{ sec_id }}
+{{ sec_content[:500] }}...
+{% endfor %}
+{% endif %}
+
+请直接输出该章节的内容，不要包含章节标题。
+"""
+
+
 # writer_skill_creator 的系统提示词
 SKILL_CREATOR_SYSTEM_PROMPT = """你是一个专门分析文书模板并创建相应写作 Skill 的专家。你的任务是根据用户提供的文书模板，生成完整的 Skill 配置。
 
@@ -83,8 +110,7 @@ SKILL_CREATOR_SYSTEM_PROMPT = """你是一个专门分析文书模板并创建�
     }
   ],
   "guidelines": "写作指南的 Markdown 内容...",
-  "system_prompt": "用于生成内容的系统提示词...",
-  "section_prompt": "用于生成章节内容的提示词模板..."
+  "system_prompt": "用于生成内容的系统提示词..."
 }
 ```
 
@@ -225,8 +251,10 @@ def _fill_defaults(
     config.setdefault("fields", [])
     config.setdefault("instructions", f"这是一个用于生成{skill_name}的写作技能。")
     config.setdefault("guidelines", f"# {skill_name}写作指南\n\n请按照模板结构进行写作。")
-    config.setdefault("system_prompt", f"你是一个专业的{skill_name}写作专家。")
-    config.setdefault("section_prompt", "")
+    config.setdefault("system_prompt", f"你是一个专业的{skill_name}写作专家。请根据用户提供的信息，生成高质量的文书内容。")
+
+    # 使用正确的 Jinja2 模板格式
+    config.setdefault("section_prompt", DEFAULT_SECTION_PROMPT_TEMPLATE)
 
     # 确保每个章节有必需字段
     for section in config.get("sections", []):
