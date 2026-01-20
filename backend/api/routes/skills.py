@@ -269,3 +269,48 @@ async def get_skill_content(skill_id: str):
             for s in skill.get_flat_sections()
         ],
     }
+
+
+@router.delete("/{skill_id}")
+async def delete_skill(skill_id: str):
+    """
+    删除指定的 Skill
+
+    注意：此操作不可逆，会删除 Skill 的所有文件
+    """
+    # 防止删除系统内置 Skill
+    protected_skills = {'writer-skill-creator', 'writer_skill_creator'}
+    if skill_id in protected_skills:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot delete system skill: {skill_id}"
+        )
+
+    registry = get_registry()
+    skill = registry.get(skill_id)
+
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+
+    # 获取 Skill 目录路径
+    skill_dir = SKILLS_DIR / skill_id
+
+    try:
+        # 从注册表中移除
+        registry.unregister(skill_id)
+
+        # 删除文件系统中的 Skill 目录
+        if skill_dir.exists():
+            shutil.rmtree(skill_dir)
+
+        return {
+            "success": True,
+            "message": f"Skill '{skill_id}' deleted successfully"
+        }
+    except Exception as e:
+        # 如果删除失败，尝试重新注册 Skill
+        try:
+            init_skills_from_directory()
+        except:
+            pass
+        raise HTTPException(status_code=500, detail=f"Failed to delete skill: {str(e)}")

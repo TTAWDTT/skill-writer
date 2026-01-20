@@ -72,6 +72,15 @@
               </svg>
               Start Writing
             </button>
+            <button
+              @click.stop="confirmDeleteSkill(skill)"
+              class="p-2.5 bg-warm-100 text-dark-100 rounded-xl hover:bg-red-100 hover:text-red-600 transition-colors"
+              title="Delete Skill"
+            >
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+              </svg>
+            </button>
           </div>
         </div>
 
@@ -124,6 +133,51 @@
       <p class="text-dark-100 font-medium mb-2">No skills available</p>
       <p class="text-dark-50 text-sm">Create your first writing skill to get started</p>
     </div>
+
+    <!-- Delete Confirmation Dialog -->
+    <div
+      v-if="showDeleteDialog"
+      class="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+      @click.self="cancelDelete"
+    >
+      <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl">
+        <div class="flex items-center gap-4 mb-4">
+          <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
+            <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+          </div>
+          <div>
+            <h3 class="text-lg font-semibold text-dark-300">Delete Skill</h3>
+            <p class="text-sm text-dark-50">This action cannot be undone</p>
+          </div>
+        </div>
+        <p class="text-dark-100 mb-6">
+          Are you sure you want to delete "<span class="font-medium">{{ skillToDelete?.name }}</span>"?
+          All associated files will be permanently removed.
+        </p>
+        <div class="flex gap-3">
+          <button
+            @click="cancelDelete"
+            class="flex-1 px-4 py-2.5 bg-warm-100 text-dark-100 rounded-xl font-medium hover:bg-warm-200 transition-colors"
+            :disabled="deleting"
+          >
+            Cancel
+          </button>
+          <button
+            @click="executeDelete"
+            class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-colors flex items-center justify-center gap-2"
+            :disabled="deleting"
+          >
+            <svg v-if="deleting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+            </svg>
+            {{ deleting ? 'Deleting...' : 'Delete' }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -136,6 +190,11 @@ const router = useRouter()
 const allSkills = ref([])
 const loading = ref(true)
 const error = ref(null)
+
+// Delete dialog state
+const showDeleteDialog = ref(false)
+const skillToDelete = ref(null)
+const deleting = ref(false)
 
 // Filter out the skill creator from the list (it's a system tool, not a writing skill)
 const skills = computed(() => {
@@ -166,6 +225,34 @@ const viewSkillDetails = (skill) => {
 
 const createNewSkill = () => {
   router.push('/create-skill')
+}
+
+const confirmDeleteSkill = (skill) => {
+  skillToDelete.value = skill
+  showDeleteDialog.value = true
+}
+
+const cancelDelete = () => {
+  showDeleteDialog.value = false
+  skillToDelete.value = null
+}
+
+const executeDelete = async () => {
+  if (!skillToDelete.value) return
+
+  deleting.value = true
+  try {
+    await api.delete(`/skills/${skillToDelete.value.id}`)
+    // Remove from local list
+    allSkills.value = allSkills.value.filter(s => s.id !== skillToDelete.value.id)
+    showDeleteDialog.value = false
+    skillToDelete.value = null
+  } catch (e) {
+    console.error('Failed to delete skill:', e)
+    alert(e.response?.data?.detail || 'Failed to delete skill. Please try again.')
+  } finally {
+    deleting.value = false
+  }
 }
 
 onMounted(() => {
