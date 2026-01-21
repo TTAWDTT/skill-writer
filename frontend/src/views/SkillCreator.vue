@@ -42,7 +42,7 @@
             type="file"
             ref="fileInput"
             @change="handleFileSelect"
-            accept=".md,.doc,.docx,.pdf,.txt"
+            accept=".md,.doc,.docx,.pdf,.txt,.pptx"
             class="hidden"
           />
           <button
@@ -51,7 +51,7 @@
           >
             Browse Files
           </button>
-          <p class="text-warm-400 text-xs mt-4">Supported formats: MD, DOC, DOCX, PDF, TXT</p>
+          <p class="text-warm-400 text-xs mt-4">Supported formats: MD, DOC, DOCX, PDF, TXT, PPTX</p>
         </div>
 
         <!-- Uploaded File Preview -->
@@ -250,11 +250,11 @@ const handleFileSelect = (e) => {
 }
 
 const processFile = (file) => {
-  const allowedTypes = ['.md', '.doc', '.docx', '.pdf', '.txt']
+  const allowedTypes = ['.md', '.doc', '.docx', '.pdf', '.txt', '.pptx']
   const ext = '.' + file.name.split('.').pop().toLowerCase()
 
   if (!allowedTypes.includes(ext)) {
-    error.value = `Unsupported file type: ${ext}. Please upload MD, DOC, DOCX, PDF, or TXT files.`
+    error.value = `Unsupported file type: ${ext}. Please upload MD, DOC, DOCX, PDF, TXT, or PPTX files.`
     return
   }
 

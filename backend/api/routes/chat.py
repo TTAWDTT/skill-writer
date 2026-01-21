@@ -348,7 +348,7 @@ async def upload_files_json(
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
     # 支持的文件类型
-    allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf'}
+    allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
     # 解析所有上传的文件
     parsed_files = []
@@ -425,7 +425,7 @@ if MULTIPART_AVAILABLE:
             raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
         # 支持的文件类型
-        allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf'}
+        allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
         # 解析所有上传的文件
         parsed_files = []

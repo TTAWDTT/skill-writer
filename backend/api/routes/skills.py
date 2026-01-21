@@ -53,7 +53,7 @@ async def create_skill_from_template(
         tags: 标签（逗号分隔）
     """
     # 验证文件类型
-    allowed_extensions = {'.md', '.doc', '.docx', '.pdf', '.txt'}
+    allowed_extensions = {'.md', '.doc', '.docx', '.pdf', '.txt', '.pptx'}
     file_ext = Path(file.filename).suffix.lower()
 
     if file_ext not in allowed_extensions:

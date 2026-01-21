@@ -4,6 +4,7 @@
 """
 from typing import Dict, Any, List, Optional, AsyncGenerator
 from dataclasses import dataclass, field
+import re
 
 from .base import BaseAgent
 from backend.core.skills.base import BaseSkill, Section
@@ -33,6 +34,133 @@ class WriterAgent(BaseAgent):
             if section.id == section_id:
                 return section
         return None
+
+    def _normalize_ordered_lists(self, content: str) -> str:
+        """将每个有序列表重新编号为从 1 开始"""
+        lines = content.splitlines()
+        normalized = []
+        in_list = False
+        list_index = 1
+        list_indent = None
+        pattern = re.compile(r'^(\s*)(\d+)([.)、．])\s+(.*)$')
+
+        for line in lines:
+            match = pattern.match(line)
+            if match:
+                indent, _, delimiter, rest = match.groups()
+                if not in_list or indent != list_indent:
+                    list_index = 1
+                    list_indent = indent
+                    in_list = True
+                normalized.append(f"{indent}{list_index}{delimiter} {rest}")
+                list_index += 1
+                continue
+
+            if line.strip() == "":
+                in_list = False
+                list_index = 1
+                list_indent = None
+                normalized.append(line)
+                continue
+
+            in_list = False
+            list_index = 1
+            list_indent = None
+            normalized.append(line)
+
+        return "\n".join(normalized)
+
+    def _strip_section_heading(self, section: Section, content: str) -> str:
+        """移除章节内容里重复的标题行（移除开头连续匹配的标题）"""
+        lines = content.splitlines()
+        if not lines:
+            return content
+
+        def normalize_title(text: str) -> str:
+            # 去掉括号内容与标点，便于匹配“标题+说明”场景
+            text = re.sub(r'[\(\（\[\【<《].*?[\)\）\]\】>》]', '', text)
+            return re.sub(r'[^0-9a-zA-Z\u4e00-\u9fff]+', '', text).lower()
+
+        target = normalize_title(section.title)
+
+        def extract_heading_text(line: str) -> str:
+            md_match = re.match(r'^#{1,6}\s*(.+)$', line)
+            if md_match:
+                return md_match.group(1).strip()
+            num_match = re.match(r'^([一二三四五六七八九十\\d]+)[、．.\\)]\\s*(.+)$', line)
+            if num_match:
+                return num_match.group(2).strip()
+            bracket_match = re.match(r'^[【\\[](.+?)[】\\]]$', line)
+            if bracket_match:
+                return bracket_match.group(1).strip()
+            return line.strip()
+
+        cleaned = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            if not stripped:
+                i += 1
+                continue
+
+            heading_text = extract_heading_text(stripped)
+            normalized = normalize_title(heading_text)
+            if normalized == target:
+                # 跳过标题行以及紧随其后的空行
+                i += 1
+                while i < len(lines) and not lines[i].strip():
+                    i += 1
+                continue
+
+            # 遇到首个正文行，保留其余全部内容
+            cleaned.append(line)
+            cleaned.extend(lines[i + 1:])
+            break
+
+        return "\n".join(cleaned)
+
+    def _postprocess_section(self, section: Section, content: str) -> str:
+        """章节后处理：去重标题 + 规范编号"""
+        content = self._strip_section_heading(section, content)
+        return self._normalize_ordered_lists(content)
+
+    def _dedupe_adjacent_heading_lines(self, content: str) -> str:
+        """移除标题行后紧跟的重复标题文本行"""
+        lines = content.splitlines()
+
+        def normalize_title(text: str) -> str:
+            text = re.sub(r'[\(\（\[\【<《].*?[\)\）\]\】>》]', '', text)
+            return re.sub(r'[^0-9a-zA-Z\u4e00-\u9fff]+', '', text).lower()
+
+        cleaned = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            cleaned.append(line)
+
+            md_match = re.match(r'^#{1,6}\s*(.+)$', line.strip())
+            if not md_match:
+                i += 1
+                continue
+
+            heading_text = md_match.group(1).strip()
+            target = normalize_title(heading_text)
+
+            j = i + 1
+            while j < len(lines) and not lines[j].strip():
+                j += 1
+
+            if j < len(lines):
+                next_line = lines[j].strip()
+                if normalize_title(next_line) == target:
+                    lines.pop(j)
+                    continue
+
+            i += 1
+
+        return "\n".join(cleaned)
 
     async def run(
         self,
@@ -115,7 +243,8 @@ class WriterAgent(BaseAgent):
             heading = "#" * section.level + " " + section.title
             contents.append(f"{heading}\n\n{content}")
 
-        return "\n\n".join(contents)
+        combined = "\n\n".join(contents)
+        return self._dedupe_adjacent_heading_lines(combined)
 
     async def _write_single_section(
         self,
@@ -137,7 +266,7 @@ class WriterAgent(BaseAgent):
         ]
 
         content = await self._chat(messages, temperature=0.5)
-        return content
+        return self._postprocess_section(section, content)
 
     async def write_section_stream(
         self,
@@ -165,7 +294,7 @@ class WriterAgent(BaseAgent):
             yield chunk
 
         # 保存到状态
-        state.sections[section.id] = full_content
+        state.sections[section.id] = self._postprocess_section(section, full_content)
         state.completed_sections.append(section.id)
 
     def _get_system_prompt(self, skill: BaseSkill) -> str:

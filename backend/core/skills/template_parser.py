@@ -1,6 +1,6 @@
 """
 模板文件解析器
-支持解析 md, doc, docx, pdf, txt 等格式的模板文件
+支持解析 md, doc, docx, pdf, txt, pptx 等格式的模板文件
 """
 import re
 from typing import Dict, List, Any, Optional
@@ -32,6 +32,9 @@ def parse_template_file(content: bytes, file_ext: str, filename: str) -> str:
     elif file_ext == '.doc':
         # .doc 格式较旧，尝试使用简单方法提取文本
         return parse_doc(content)
+
+    elif file_ext == '.pptx':
+        return parse_pptx(content)
 
     elif file_ext == '.pdf':
         return parse_pdf(content)
@@ -114,6 +117,36 @@ def parse_doc(content: bytes) -> str:
 
     except Exception as e:
         raise ValueError(f"Failed to parse DOC file: {str(e)}. Please convert to DOCX format.")
+
+
+def parse_pptx(content: bytes) -> str:
+    """解析 PPTX 文件"""
+    try:
+        import io
+        from pptx import Presentation
+
+        presentation = Presentation(io.BytesIO(content))
+        text_parts = []
+
+        for slide in presentation.slides:
+            for shape in slide.shapes:
+                if getattr(shape, "has_text_frame", False):
+                    for paragraph in shape.text_frame.paragraphs:
+                        runs_text = "".join(run.text for run in paragraph.runs).strip()
+                        text = runs_text or paragraph.text.strip()
+                        if text:
+                            text_parts.append(text)
+                elif getattr(shape, "has_table", False):
+                    for row in shape.table.rows:
+                        for cell in row.cells:
+                            cell_text = cell.text.strip()
+                            if cell_text:
+                                text_parts.append(cell_text)
+
+        return "\n".join(text_parts)
+
+    except Exception as e:
+        raise ValueError(f"Failed to parse PPTX file: {str(e)}")
 
 
 def parse_pdf(content: bytes) -> str:

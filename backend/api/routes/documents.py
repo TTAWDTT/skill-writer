@@ -302,7 +302,7 @@ async def export_content(request: ExportRequest):
                     # 使用普通段落，手动设置格式
                     heading_para = doc.add_paragraph()
                     # 设置标题字体大小
-                    sizes = {1: 22, 2: 18, 3: 16, 4: 14, 5: 12, 6: 11}
+                    sizes = {1: 26, 2: 20, 3: 18, 4: 16, 5: 14, 6: 12}
                     run = heading_para.add_run(title_text)
                     set_run_font(run, font_name='黑体', font_size=sizes.get(level, 14), bold=True)
                     # 设置段落间距

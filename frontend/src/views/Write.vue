@@ -25,7 +25,7 @@
           @dragleave="isDragging = false"
           @drop.prevent="handleDrop"
         >
-          <input ref="fileInputRef" type="file" multiple accept=".md,.txt,.doc,.docx,.pdf" class="hidden" @change="handleFileSelect" />
+          <input ref="fileInputRef" type="file" multiple accept=".md,.txt,.doc,.docx,.pdf,.pptx" class="hidden" @change="handleFileSelect" />
 
           <div v-if="isUploading" class="flex flex-col items-center">
             <div class="w-12 h-12 border-3 border-warm-300 border-t-anthropic-orange rounded-full spinner mb-3"></div>
@@ -39,7 +39,7 @@
             </svg>
             <p class="text-dark-100 font-medium">Drag & drop files here</p>
             <p class="text-sm text-dark-50 mt-1">or click to browse</p>
-            <p class="text-xs text-warm-400 mt-3">Supports: .md, .txt, .doc, .docx, .pdf</p>
+            <p class="text-xs text-warm-400 mt-3">Supports: .md, .txt, .doc, .docx, .pdf, .pptx</p>
           </div>
         </div>
 

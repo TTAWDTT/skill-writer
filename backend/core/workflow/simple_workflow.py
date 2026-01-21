@@ -299,6 +299,8 @@ class SimpleWorkflow:
                         "content": chunk,
                     }
 
+                section_content = self.writer_agent._postprocess_section(section, section_content)
+
                 # 保存章节内容
                 session.sections[section.id] = section_content
 
@@ -314,7 +316,8 @@ class SimpleWorkflow:
                 }
 
             # 组装最终文档
-            session.final_document = "\n\n".join(all_content)
+            combined = "\n\n".join(all_content)
+            session.final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
             session.phase = "complete"
             self.store.save(session)
 
