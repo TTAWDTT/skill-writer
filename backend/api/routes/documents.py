@@ -11,10 +11,11 @@ import uuid
 import io
 import re
 
-router = APIRouter()
+from backend.models.database import get_database, Document as DocumentModel
 
-# 简单的内存存储（生产环境应使用数据库）
-_documents = {}
+router = APIRouter()
+db = get_database()
+
 
 
 class DocumentCreate(BaseModel):
@@ -52,80 +53,122 @@ class ExportRequest(BaseModel):
 async def create_document(doc: DocumentCreate):
     """创建新文档"""
     doc_id = str(uuid.uuid4())
-    now = datetime.now().isoformat()
+    now = datetime.utcnow()
 
-    document = {
-        "id": doc_id,
-        "title": doc.title,
-        "skill_id": doc.skill_id,
-        "content": doc.content,
-        "session_id": doc.session_id,
-        "created_at": now,
-        "updated_at": now,
-    }
+    with db.get_session() as db_session:
+        record = DocumentModel(
+            id=doc_id,
+            session_id=doc.session_id,
+            skill_id=doc.skill_id,
+            title=doc.title,
+            content=doc.content,
+            created_at=now,
+            updated_at=now,
+        )
+        db_session.add(record)
+        db_session.commit()
 
-    _documents[doc_id] = document
-    return DocumentResponse(**document)
+    return DocumentResponse(
+        id=doc_id,
+        title=doc.title,
+        skill_id=doc.skill_id,
+        content=doc.content,
+        created_at=now.isoformat(),
+        updated_at=now.isoformat(),
+    )
 
 
 @router.get("/", response_model=List[DocumentResponse])
 async def list_documents(skill_id: Optional[str] = None):
     """获取文档列表"""
-    docs = list(_documents.values())
+    with db.get_session() as db_session:
+        query = db_session.query(DocumentModel)
+        if skill_id:
+            query = query.filter(DocumentModel.skill_id == skill_id)
+        records = query.order_by(DocumentModel.updated_at.desc()).all()
 
-    if skill_id:
-        docs = [d for d in docs if d["skill_id"] == skill_id]
-
-    # 按更新时间倒序
-    docs.sort(key=lambda x: x["updated_at"], reverse=True)
-
-    return [DocumentResponse(**d) for d in docs]
+    return [
+        DocumentResponse(
+            id=doc.id,
+            title=doc.title,
+            skill_id=doc.skill_id,
+            content=doc.content,
+            created_at=doc.created_at.isoformat() if doc.created_at else "",
+            updated_at=doc.updated_at.isoformat() if doc.updated_at else "",
+        )
+        for doc in records
+    ]
 
 
 @router.get("/{doc_id}", response_model=DocumentResponse)
 async def get_document(doc_id: str):
     """获取单个文档"""
-    if doc_id not in _documents:
-        raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+    with db.get_session() as db_session:
+        record = db_session.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
 
-    return DocumentResponse(**_documents[doc_id])
+    return DocumentResponse(
+        id=record.id,
+        title=record.title,
+        skill_id=record.skill_id,
+        content=record.content,
+        created_at=record.created_at.isoformat() if record.created_at else "",
+        updated_at=record.updated_at.isoformat() if record.updated_at else "",
+    )
 
 
 @router.put("/{doc_id}", response_model=DocumentResponse)
 async def update_document(doc_id: str, update: DocumentUpdate):
     """更新文档"""
-    if doc_id not in _documents:
-        raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+    with db.get_session() as db_session:
+        record = db_session.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
 
-    doc = _documents[doc_id]
+        if update.title is not None:
+            record.title = update.title
+        if update.content is not None:
+            record.content = update.content
 
-    if update.title is not None:
-        doc["title"] = update.title
-    if update.content is not None:
-        doc["content"] = update.content
+        record.updated_at = datetime.utcnow()
+        db_session.commit()
 
-    doc["updated_at"] = datetime.now().isoformat()
-
-    return DocumentResponse(**doc)
+        return DocumentResponse(
+            id=record.id,
+            title=record.title,
+            skill_id=record.skill_id,
+            content=record.content,
+            created_at=record.created_at.isoformat() if record.created_at else "",
+            updated_at=record.updated_at.isoformat() if record.updated_at else "",
+        )
 
 
 @router.delete("/{doc_id}")
 async def delete_document(doc_id: str):
     """删除文档"""
-    if doc_id not in _documents:
-        raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+    with db.get_session() as db_session:
+        record = db_session.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+        db_session.delete(record)
+        db_session.commit()
 
-    del _documents[doc_id]
     return {"message": "Document deleted"}
 
 
 @router.get("/{doc_id}/export")
 async def export_document(doc_id: str, format: str = "markdown"):
     """导出文档"""
-    if doc_id not in _documents:
-        raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
+    with db.get_session() as db_session:
+        record = db_session.query(DocumentModel).filter(DocumentModel.id == doc_id).first()
+        if not record:
+            raise HTTPException(status_code=404, detail=f"Document not found: {doc_id}")
 
-    doc = _documents[doc_id]
+    doc = {
+        "title": record.title,
+        "content": record.content,
+    }
 
     if format == "markdown":
         return {

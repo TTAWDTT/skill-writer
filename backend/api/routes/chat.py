@@ -16,6 +16,7 @@ from backend.core.agents.file_extractor import (
     extract_info_from_multiple_files,
     generate_field_from_files,
 )
+from backend.core.llm.config_store import get_llm_config, LLMProviderType
 
 try:
     import multipart  # noqa: F401
@@ -24,6 +25,18 @@ except Exception:
     MULTIPART_AVAILABLE = False
 
 router = APIRouter()
+
+
+def _has_llm_credentials() -> bool:
+    config = get_llm_config()
+    if config.provider == LLMProviderType.GITHUB_COPILOT:
+        return bool(config.github_token)
+    if config.provider == LLMProviderType.GOOGLE_GEMINI:
+        return bool(config.api_key)
+    if config.api_key:
+        return True
+    base_url = (config.base_url or "").lower()
+    return "localhost" in base_url or "127.0.0.1" in base_url
 
 
 class StartSessionRequest(BaseModel):
@@ -273,13 +286,25 @@ async def _handle_parsed_upload(
         }
 
     skill_fields = _build_skill_fields(skill)
+    extraction_error = None
+    extraction_result = {
+        "extracted_fields": {},
+        "external_information": "",
+        "summaries": "",
+    }
 
-    extraction_result = await extract_info_from_multiple_files(
-        files=parsed_files,
-        skill_fields=skill_fields,
-        skill_name=skill.metadata.name,
-        existing_requirements=session.requirements,
-    )
+    if _has_llm_credentials():
+        try:
+            extraction_result = await extract_info_from_multiple_files(
+                files=parsed_files,
+                skill_fields=skill_fields,
+                skill_name=skill.metadata.name,
+                existing_requirements=session.requirements,
+            )
+        except Exception as e:
+            extraction_error = str(e)
+    else:
+        extraction_error = "LLM not configured"
 
     # 更新会话状态
     for pf in parsed_files:
@@ -321,10 +346,14 @@ async def _handle_parsed_upload(
     })
     workflow.save_session(session)
 
+    message = f"成功处理 {len(parsed_files)} 个文件"
+    if extraction_error:
+        message += "（未自动提取字段）"
+
     return {
         "success": True,
         "session_id": session.session_id,
-        "message": f"成功处理 {len(parsed_files)} 个文件",
+        "message": message,
         "file_results": file_summaries,
         "extracted_fields": extracted_fields,
         "external_information": external_info[:500] + "..." if len(external_info) > 500 else external_info,
@@ -516,6 +545,9 @@ async def generate_field(session_id: str, request: GenerateFieldRequest):
 
     if not session.uploaded_files:
         raise HTTPException(status_code=400, detail="No uploaded files found for this session")
+
+    if not _has_llm_credentials():
+        raise HTTPException(status_code=400, detail="LLM 未配置，请在设置中配置 API Key 或登录 GitHub")
 
     registry = get_registry()
     skill = registry.get(session.skill_id)

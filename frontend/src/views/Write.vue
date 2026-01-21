@@ -269,6 +269,7 @@ const writingProgress = ref({ current: 0, total: 0 })
 const showExportMenu = ref(false)
 const exportDropdown = ref(null)
 const copyButtonText = ref('Copy')
+const savedDocumentId = ref(null)
 
 // Requirements form state
 const requirementFields = ref([])
@@ -340,6 +341,43 @@ const isTextareaField = (field) => {
   return field.type === 'textarea' || (field.description && field.description.length > 50)
 }
 
+const getDocumentTitle = () => {
+  const candidates = [
+    formData.title,
+    formData.project_title,
+    formData.project_name,
+    formData.name
+  ]
+  const matched = candidates.find((value) => value && value.toString().trim())
+  if (matched) return matched.toString().trim()
+
+  const base = skill.value?.name || 'Document'
+  const stamp = new Date().toISOString().slice(0, 10)
+  return `${base} ${stamp}`
+}
+
+const saveDocument = async () => {
+  if (!documentContent.value || !sessionId.value) return
+
+  try {
+    if (savedDocumentId.value) {
+      await api.put(`/documents/${savedDocumentId.value}`, {
+        content: documentContent.value
+      })
+    } else {
+      const response = await api.post('/documents/', {
+        title: getDocumentTitle(),
+        skill_id: skillId.value,
+        content: documentContent.value,
+        session_id: sessionId.value
+      })
+      savedDocumentId.value = response.data.id
+    }
+  } catch (e) {
+    console.error('Failed to save document:', e)
+  }
+}
+
 // Methods
 const fetchSkill = async () => {
   try {
@@ -356,6 +394,7 @@ const startSession = async () => {
       skill_id: skillId.value
     })
     sessionId.value = response.data.session_id
+    savedDocumentId.value = null
     await fetchRequirements()
     await fetchSessionFiles()
   } catch (e) {
@@ -505,6 +544,7 @@ const startStreamGeneration = async () => {
           currentSection.value = ''
           documentContent.value = data.document
           closeEventSource()
+          saveDocument()
           break
 
         case 'error':

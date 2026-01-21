@@ -49,6 +49,12 @@
               View
             </button>
             <button
+              @click="renameDocument(doc)"
+              class="px-4 py-2 text-sm bg-warm-200 text-dark-100 rounded-xl hover:bg-warm-300 transition-colors font-medium"
+            >
+              Rename
+            </button>
+            <button
               @click="deleteDocument(doc.id)"
               class="px-4 py-2 text-sm bg-red-50 text-red-600 rounded-xl hover:bg-red-100 transition-colors font-medium"
             >
@@ -140,6 +146,23 @@ const fetchDocuments = async () => {
 
 const viewDocument = (doc) => {
   selectedDocument.value = doc
+}
+
+const renameDocument = async (doc) => {
+  const newTitle = window.prompt('Enter a new document name:', doc.title)
+  if (!newTitle || !newTitle.trim() || newTitle.trim() === doc.title) return
+
+  try {
+    const response = await api.put(`/documents/${doc.id}`, { title: newTitle.trim() })
+    const updated = response.data
+    documents.value = documents.value.map(item => (item.id === doc.id ? updated : item))
+    if (selectedDocument.value?.id === doc.id) {
+      selectedDocument.value = updated
+    }
+  } catch (e) {
+    console.error('Failed to rename document:', e)
+    alert('Failed to rename')
+  }
 }
 
 const deleteDocument = async (docId) => {
