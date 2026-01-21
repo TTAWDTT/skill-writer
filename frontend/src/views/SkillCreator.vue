@@ -209,12 +209,19 @@
         </div>
       </div>
     </div>
+    <Toast
+      :show="toastVisible"
+      :title="toastTitle"
+      :message="toastMessage"
+      @close="toastVisible = false"
+    />
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onUnmounted } from 'vue'
 import { api } from '../api'
+import Toast from '../components/Toast.vue'
 
 // State
 const isDragging = ref(false)
@@ -225,6 +232,10 @@ const generationProgress = ref(0)
 const generationStatus = ref('')
 const generationComplete = ref(false)
 const error = ref(null)
+const toastVisible = ref(false)
+const toastTitle = ref('')
+const toastMessage = ref('')
+let toastTimer = null
 
 const skillInfo = ref({
   name: '',
@@ -283,10 +294,22 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+const showToast = (title, message) => {
+  toastTitle.value = title
+  toastMessage.value = message
+  toastVisible.value = true
+  if (toastTimer) {
+    clearTimeout(toastTimer)
+  }
+  toastTimer = setTimeout(() => {
+    toastVisible.value = false
+  }, 2600)
+}
+
 const notifyModelNotConfigured = (error) => {
   const detail = error?.response?.data?.detail
   if (detail === '模型未配置') {
-    alert('模型未配置')
+    showToast('模型未配置', '请先在设置中配置模型。')
     return true
   }
   return false
@@ -345,7 +368,7 @@ const generateSkill = async () => {
   } catch (e) {
     console.error('Failed to generate skill:', e)
     if (notifyModelNotConfigured(e)) {
-      error.value = '模型未配置'
+      error.value = null
       isGenerating.value = false
       return
     }
@@ -366,6 +389,12 @@ const resetForm = () => {
   generationProgress.value = 0
   error.value = null
 }
+
+onUnmounted(() => {
+  if (toastTimer) {
+    clearTimeout(toastTimer)
+  }
+})
 </script>
 
 <style scoped>

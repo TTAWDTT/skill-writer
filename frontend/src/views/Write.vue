@@ -245,6 +245,12 @@
         </Transition>
       </div>
     </div>
+    <Toast
+      :show="toastVisible"
+      :title="toastTitle"
+      :message="toastMessage"
+      @close="toastVisible = false"
+    />
   </div>
 </template>
 
@@ -254,6 +260,7 @@ import { useRoute } from 'vue-router'
 import { marked } from 'marked'
 import { api } from '../api'
 import { debounce } from '../utils/performance'
+import Toast from '../components/Toast.vue'
 
 const route = useRoute()
 const skillId = computed(() => route.params.skillId)
@@ -286,6 +293,10 @@ const generatingFields = reactive({})
 
 // Store EventSource reference for cleanup
 const eventSourceRef = shallowRef(null)
+const toastVisible = ref(false)
+const toastTitle = ref('')
+const toastMessage = ref('')
+let toastTimer = null
 
 // Debounced rendered document
 const renderedDocumentDebounced = ref('')
@@ -378,10 +389,22 @@ const saveDocument = async () => {
   }
 }
 
+const showToast = (title, message) => {
+  toastTitle.value = title
+  toastMessage.value = message
+  toastVisible.value = true
+  if (toastTimer) {
+    clearTimeout(toastTimer)
+  }
+  toastTimer = setTimeout(() => {
+    toastVisible.value = false
+  }, 2600)
+}
+
 const notifyModelNotConfigured = (error) => {
   const detail = error?.response?.data?.detail
   if (detail === '模型未配置') {
-    alert('模型未配置')
+    showToast('模型未配置', '请先在设置中配置模型。')
     return true
   }
   return false
@@ -773,6 +796,9 @@ onMounted(async () => {
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
   closeEventSource()
+  if (toastTimer) {
+    clearTimeout(toastTimer)
+  }
 })
 </script>
 
