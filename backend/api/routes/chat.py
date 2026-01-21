@@ -14,6 +14,7 @@ from backend.core.skills.registry import get_registry
 from backend.core.agents.file_extractor import (
     parse_uploaded_file,
     extract_info_from_multiple_files,
+    generate_field_from_files,
 )
 
 try:
@@ -55,6 +56,11 @@ class UploadFilePayload(BaseModel):
 class UploadFilesRequest(BaseModel):
     """JSON 上传请求"""
     files: List[UploadFilePayload]
+
+
+class GenerateFieldRequest(BaseModel):
+    """生成单个字段请求"""
+    field_id: str
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -239,6 +245,16 @@ def _build_skill_fields(skill) -> List[dict]:
     ]
 
 
+def _trim_file_content(content: str, max_chars: int = 20000) -> str:
+    """限制存储的文件内容长度，避免数据库过大"""
+    if not content:
+        return ""
+    content = content.strip()
+    if len(content) <= max_chars:
+        return content
+    return content[:max_chars]
+
+
 async def _handle_parsed_upload(
     session,
     skill,
@@ -271,6 +287,7 @@ async def _handle_parsed_upload(
             "filename": pf["filename"],
             "content_type": pf.get("content_type", ""),
             "size": pf.get("size", 0),
+            "content": _trim_file_content(pf.get("content", "")),
             "extracted_fields": extraction_result.get("extracted_fields", {}),
         })
 
@@ -476,10 +493,83 @@ async def get_session_files(session_id: str):
     if not session:
         raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
 
+    files = [
+        {k: v for k, v in file_info.items() if k != "content"}
+        for file_info in session.uploaded_files
+    ]
+
     return {
         "session_id": session.session_id,
-        "files": session.uploaded_files,
+        "files": files,
         "external_information": session.external_information,
+    }
+
+
+@router.post("/session/{session_id}/generate-field")
+async def generate_field(session_id: str, request: GenerateFieldRequest):
+    """基于已上传材料生成单个字段内容"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    if not session.uploaded_files:
+        raise HTTPException(status_code=400, detail="No uploaded files found for this session")
+
+    registry = get_registry()
+    skill = registry.get(session.skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+    field = next((f for f in skill.requirement_fields if f.id == request.field_id), None)
+    if not field:
+        raise HTTPException(status_code=404, detail=f"Field not found: {request.field_id}")
+
+    files = [
+        {
+            "filename": f.get("filename", "unknown"),
+            "content": f.get("content", ""),
+        }
+        for f in session.uploaded_files
+    ]
+
+    if not any(f.get("content") for f in files):
+        raise HTTPException(status_code=400, detail="No file content available; please re-upload files")
+
+    result = await generate_field_from_files(
+        files=files,
+        field={
+            "id": field.id,
+            "name": field.name,
+            "description": field.description,
+            "type": field.field_type,
+        },
+        skill_name=skill.metadata.name,
+        existing_requirements=session.requirements,
+        external_information=session.external_information,
+    )
+
+    value = result.get("value")
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return {
+            "success": False,
+            "session_id": session_id,
+            "field_id": field.id,
+            "message": "未在材料中找到相关信息",
+            "value": None,
+        }
+
+    if session.requirements is None:
+        session.requirements = {}
+    session.requirements[field.id] = value
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "field_id": field.id,
+        "value": value,
     }
 
 

@@ -115,20 +115,30 @@
                     </span>
                   </td>
                   <td class="px-4 py-3">
-                    <textarea
-                      v-if="field.type === 'textarea' || (field.description && field.description.length > 50)"
-                      v-model="formData[field.id]"
-                      :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                      rows="4"
-                      class="w-full px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none transition-all"
-                    ></textarea>
-                    <input
-                      v-else
-                      v-model="formData[field.id]"
-                      :type="field.type === 'number' ? 'number' : 'text'"
-                      :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                      class="w-full px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent transition-all"
-                    />
+                    <div class="flex gap-3" :class="isTextareaField(field) ? 'items-start' : 'items-center'">
+                      <textarea
+                        v-if="isTextareaField(field)"
+                        v-model="formData[field.id]"
+                        :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
+                        rows="4"
+                        class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none transition-all"
+                      ></textarea>
+                      <input
+                        v-else
+                        v-model="formData[field.id]"
+                        :type="field.type === 'number' ? 'number' : 'text'"
+                        :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
+                        class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent transition-all"
+                      />
+                      <button
+                        type="button"
+                        @click="generateField(field)"
+                        :disabled="!canAutoGenerate || isGeneratingField(field.id)"
+                        class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg border border-warm-300 bg-warm-100 text-dark-100 hover:bg-warm-200 disabled:bg-warm-200 disabled:text-warm-500 disabled:cursor-not-allowed transition-all"
+                      >
+                        {{ isGeneratingField(field.id) ? '生成中...' : 'AI生成' }}
+                      </button>
+                    </div>
                   </td>
                 </tr>
               </tbody>
@@ -271,6 +281,7 @@ const fileInputRef = ref(null)
 const isUploading = ref(false)
 const isDragging = ref(false)
 const uploadedFiles = ref([])
+const generatingFields = reactive({})
 
 // Store EventSource reference for cleanup
 const eventSourceRef = shallowRef(null)
@@ -316,10 +327,18 @@ const canGenerate = computed(() => {
   })
 })
 
+const canAutoGenerate = computed(() => {
+  return !!sessionId.value && uploadedFiles.value.length > 0
+})
+
 const progressPercent = computed(() => {
   if (writingProgress.value.total === 0) return 0
   return Math.round(writingProgress.value.current / writingProgress.value.total * 100)
 })
+
+const isTextareaField = (field) => {
+  return field.type === 'textarea' || (field.description && field.description.length > 50)
+}
 
 // Methods
 const fetchSkill = async () => {
@@ -338,6 +357,7 @@ const startSession = async () => {
     })
     sessionId.value = response.data.session_id
     await fetchRequirements()
+    await fetchSessionFiles()
   } catch (e) {
     console.error('Failed to start session:', e)
   }
@@ -363,6 +383,25 @@ const fetchRequirements = async () => {
   }
 }
 
+const fetchSessionFiles = async () => {
+  if (!sessionId.value) return
+
+  try {
+    const response = await api.get(`/chat/session/${sessionId.value}/files`)
+    const files = response.data.files || []
+    uploadedFiles.value = files.map((file) => ({
+      name: file.filename,
+      extractedCount: file.extracted_fields ? Object.keys(file.extracted_fields).length : 0,
+    }))
+
+    if (response.data.external_information) {
+      externalInformation.value = response.data.external_information
+    }
+  } catch (e) {
+    console.error('Failed to fetch session files:', e)
+  }
+}
+
 // Save form data to server (debounced)
 const saveRequirementsDebounced = debounce(async () => {
   if (!sessionId.value) return
@@ -378,6 +417,32 @@ const saveRequirementsDebounced = debounce(async () => {
 watch(formData, () => {
   saveRequirementsDebounced()
 }, { deep: true })
+
+const isGeneratingField = (fieldId) => {
+  return !!generatingFields[fieldId]
+}
+
+const generateField = async (field) => {
+  if (!sessionId.value || !canAutoGenerate.value || isGeneratingField(field.id)) return
+
+  generatingFields[field.id] = true
+  try {
+    const response = await api.post(`/chat/session/${sessionId.value}/generate-field`, {
+      field_id: field.id
+    })
+
+    if (response.data.success) {
+      formData[field.id] = response.data.value ?? ''
+    } else {
+      alert(response.data.message || 'AI 生成失败')
+    }
+  } catch (e) {
+    console.error('AI generate failed:', e)
+    alert(e.response?.data?.detail || 'AI 生成失败')
+  } finally {
+    generatingFields[field.id] = false
+  }
+}
 
 const startGeneration = async () => {
   if (!canGenerate.value || isWriting.value) return
@@ -532,18 +597,11 @@ const uploadFiles = async (files) => {
         }
       })
 
-      // Add to uploaded files list
-      files.forEach(file => {
-        uploadedFiles.value.push({
-          name: file.name,
-          extractedCount: extractedCount
-        })
-      })
-
       if (result.external_information) {
         externalInformation.value = result.external_information
       }
 
+      await fetchSessionFiles()
       await fetchRequirements()
     } else {
       alert(result.message || 'File processing failed')

@@ -40,6 +40,22 @@ EXTRACTION_SYSTEM_PROMPT = """你是一个专业的文档分析助手。你的�
 - 保持客观准确，不要编造信息
 """
 
+# 单字段生成系统提示词
+FIELD_GENERATION_SYSTEM_PROMPT = """你是一个严谨的材料分析助手。你的任务是根据用户上传的材料，为指定字段生成内容。
+
+要求：
+1. 只能基于材料中明确出现的信息，不要编造或猜测
+2. 如果材料中没有相关信息，value 必须返回 null
+3. 输出必须是严格的 JSON
+
+输出格式：
+```json
+{
+  "value": "字段内容"
+}
+```
+"""
+
 
 async def extract_info_from_file(
     file_content: str,
@@ -180,6 +196,118 @@ def _parse_extraction_response(response: str, filename: str) -> Dict[str, Any]:
     # 如果都失败了，将整个响应作为 external_information
     result["external_information"] = response
     return result
+
+
+def _build_files_context(files: List[Dict[str, Any]], max_chars: int = 20000) -> str:
+    """构建用于 LLM 的文件内容上下文"""
+    blocks = []
+    remaining = max_chars
+
+    for file_info in files:
+        if remaining <= 0:
+            break
+        filename = file_info.get("filename", "unknown")
+        content = (file_info.get("content") or "").strip()
+        if not content:
+            continue
+        if len(content) > remaining:
+            content = content[:remaining]
+        blocks.append(f"### {filename}\n{content}")
+        remaining -= len(content)
+
+    return "\n\n".join(blocks)
+
+
+def _parse_field_generation_response(response: str) -> Optional[Any]:
+    """解析单字段生成的响应"""
+    import json
+    import re
+
+    try:
+        data = json.loads(response)
+        return data.get("value")
+    except json.JSONDecodeError:
+        pass
+
+    json_pattern = r'```(?:json)?\s*([\s\S]*?)\s*```'
+    matches = re.findall(json_pattern, response)
+
+    for match in matches:
+        try:
+            data = json.loads(match)
+            return data.get("value")
+        except json.JSONDecodeError:
+            continue
+
+    json_start = response.find('{')
+    json_end = response.rfind('}')
+
+    if json_start != -1 and json_end != -1:
+        try:
+            data = json.loads(response[json_start:json_end + 1])
+            return data.get("value")
+        except json.JSONDecodeError:
+            pass
+
+    return None
+
+
+async def generate_field_from_files(
+    files: List[Dict[str, Any]],
+    field: Dict[str, Any],
+    skill_name: str = "",
+    existing_requirements: Optional[Dict] = None,
+    external_information: str = "",
+) -> Dict[str, Any]:
+    """
+    根据上传文件生成指定字段内容
+
+    Returns:
+        {"value": Any}
+    """
+    field_name = field.get("name") or field.get("id")
+    field_desc = field.get("description") or "无"
+    field_type = field.get("type") or "text"
+
+    files_context = _build_files_context(files, max_chars=20000)
+    if external_information:
+        external_excerpt = external_information[:4000]
+        files_context = f"{files_context}\n\n### 补充信息\n{external_excerpt}"
+
+    user_prompt = f"""请根据以下材料，为指定字段生成内容。
+
+## 文书类型
+{skill_name or "未指定"}
+
+## 目标字段
+- 名称：{field_name}
+- ID：{field.get('id')}
+- 类型：{field_type}
+- 描述：{field_desc}
+
+## 已收集的信息
+{_format_existing_requirements(existing_requirements)}
+
+## 材料内容
+{files_context or "（无可用材料）"}
+
+请严格按 JSON 输出。
+"""
+
+    messages = [
+        {"role": "system", "content": FIELD_GENERATION_SYSTEM_PROMPT},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    llm_client = get_llm_client()
+    response = await llm_client.chat(messages, temperature=0.2, max_tokens=1024)
+    value = _parse_field_generation_response(response)
+
+    if isinstance(value, (dict, list)):
+        import json
+        value = json.dumps(value, ensure_ascii=False, indent=2)
+
+    return {"value": value}
 
 
 async def extract_info_from_multiple_files(
