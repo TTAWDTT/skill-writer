@@ -378,6 +378,15 @@ const saveDocument = async () => {
   }
 }
 
+const notifyModelNotConfigured = (error) => {
+  const detail = error?.response?.data?.detail
+  if (detail === '模型未配置') {
+    alert('模型未配置')
+    return true
+  }
+  return false
+}
+
 // Methods
 const fetchSkill = async () => {
   try {
@@ -398,7 +407,9 @@ const startSession = async () => {
     await fetchRequirements()
     await fetchSessionFiles()
   } catch (e) {
+    if (notifyModelNotConfigured(e)) return
     console.error('Failed to start session:', e)
+    alert(e.response?.data?.detail || 'Failed to start session.')
   }
 }
 
@@ -477,6 +488,7 @@ const generateField = async (field) => {
     }
   } catch (e) {
     console.error('AI generate failed:', e)
+    if (notifyModelNotConfigured(e)) return
     alert(e.response?.data?.detail || 'AI 生成失败')
   } finally {
     generatingFields[field.id] = false
@@ -502,7 +514,8 @@ const startGeneration = async () => {
 
   } catch (e) {
     console.error('Failed to start generation:', e)
-    alert('Failed to start generation. Please try again.')
+    if (notifyModelNotConfigured(e)) return
+    alert(e.response?.data?.detail || 'Failed to start generation. Please try again.')
   }
 }
 
@@ -649,6 +662,7 @@ const uploadFiles = async (files) => {
 
   } catch (e) {
     console.error('File upload failed:', e)
+    if (notifyModelNotConfigured(e)) return
     alert(e.response?.data?.detail || 'File upload failed')
   } finally {
     isUploading.value = false

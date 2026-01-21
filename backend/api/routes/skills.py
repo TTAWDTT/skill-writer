@@ -11,6 +11,7 @@ import yaml
 from backend.core.skills.registry import get_registry, init_skills_from_directory
 from backend.core.skills.template_parser import parse_template_file
 from backend.core.skills.skill_generator import generate_skill_with_llm
+from backend.core.llm.config_store import has_llm_credentials
 from backend.config import SKILLS_DIR
 
 router = APIRouter()
@@ -61,6 +62,9 @@ async def create_skill_from_template(
             status_code=400,
             detail=f"Unsupported file type: {file_ext}. Allowed: {', '.join(allowed_extensions)}"
         )
+
+    if not has_llm_credentials():
+        raise HTTPException(status_code=400, detail="模型未配置")
 
     skill_dir = None
     try:

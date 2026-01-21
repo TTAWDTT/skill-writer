@@ -16,7 +16,7 @@ from backend.core.agents.file_extractor import (
     extract_info_from_multiple_files,
     generate_field_from_files,
 )
-from backend.core.llm.config_store import get_llm_config, LLMProviderType
+from backend.core.llm.config_store import has_llm_credentials
 
 try:
     import multipart  # noqa: F401
@@ -27,16 +27,9 @@ except Exception:
 router = APIRouter()
 
 
-def _has_llm_credentials() -> bool:
-    config = get_llm_config()
-    if config.provider == LLMProviderType.GITHUB_COPILOT:
-        return bool(config.github_token)
-    if config.provider == LLMProviderType.GOOGLE_GEMINI:
-        return bool(config.api_key)
-    if config.api_key:
-        return True
-    base_url = (config.base_url or "").lower()
-    return "localhost" in base_url or "127.0.0.1" in base_url
+def _ensure_llm_configured():
+    if not has_llm_credentials():
+        raise HTTPException(status_code=400, detail="模型未配置")
 
 
 class StartSessionRequest(BaseModel):
@@ -90,6 +83,8 @@ async def start_session(request: StartSessionRequest):
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {request.skill_id}")
 
+    _ensure_llm_configured()
+
     # 开始会话
     workflow = get_workflow()
     result = await workflow.start_session(request.skill_id)
@@ -113,6 +108,7 @@ async def send_message(request: ChatRequest):
     - 在需求收集阶段，发送用户回复
     - 如果需求收集完成，自动进入写作阶段
     """
+    _ensure_llm_configured()
     workflow = get_workflow()
     result = await workflow.chat(request.session_id, request.message)
 
@@ -136,6 +132,7 @@ async def generate_document(session_id: str):
     - 在 writing 阶段调用
     - 返回生成的完整文档
     """
+    _ensure_llm_configured()
     workflow = get_workflow()
     result = await workflow.generate_document(session_id)
 
@@ -170,6 +167,8 @@ async def generate_document_stream(session_id: str):
             status_code=400,
             detail=f"Session not in writing phase: {session.phase}"
         )
+
+    _ensure_llm_configured()
 
     async def event_generator():
         try:
@@ -275,6 +274,7 @@ async def _handle_parsed_upload(
     parsed_files: List[dict],
     file_summaries: List[str],
 ):
+    _ensure_llm_configured()
     if not parsed_files:
         return {
             "success": False,
@@ -286,25 +286,21 @@ async def _handle_parsed_upload(
         }
 
     skill_fields = _build_skill_fields(skill)
-    extraction_error = None
     extraction_result = {
         "extracted_fields": {},
         "external_information": "",
         "summaries": "",
     }
 
-    if _has_llm_credentials():
-        try:
-            extraction_result = await extract_info_from_multiple_files(
-                files=parsed_files,
-                skill_fields=skill_fields,
-                skill_name=skill.metadata.name,
-                existing_requirements=session.requirements,
-            )
-        except Exception as e:
-            extraction_error = str(e)
-    else:
-        extraction_error = "LLM not configured"
+    try:
+        extraction_result = await extract_info_from_multiple_files(
+            files=parsed_files,
+            skill_fields=skill_fields,
+            skill_name=skill.metadata.name,
+            existing_requirements=session.requirements,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"文件信息提取失败: {str(e)}") from e
 
     # 更新会话状态
     for pf in parsed_files:
@@ -346,14 +342,10 @@ async def _handle_parsed_upload(
     })
     workflow.save_session(session)
 
-    message = f"成功处理 {len(parsed_files)} 个文件"
-    if extraction_error:
-        message += "（未自动提取字段）"
-
     return {
         "success": True,
         "session_id": session.session_id,
-        "message": message,
+        "message": f"成功处理 {len(parsed_files)} 个文件",
         "file_results": file_summaries,
         "extracted_fields": extracted_fields,
         "external_information": external_info[:500] + "..." if len(external_info) > 500 else external_info,
@@ -393,6 +385,8 @@ async def upload_files_json(
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
+    _ensure_llm_configured()
+
     # 支持的文件类型
     allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
@@ -428,12 +422,14 @@ async def upload_files_json(
 
     try:
         return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
+    except HTTPException:
+        raise
     except Exception as e:
         import traceback
         print(f"[File Upload Error] {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
-            detail=f"文件信息提取失败: {str(e)}"
+            detail=str(e)
         )
 
 
@@ -470,6 +466,8 @@ if MULTIPART_AVAILABLE:
         if not skill:
             raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
+        _ensure_llm_configured()
+
         # 支持的文件类型
         allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
@@ -504,12 +502,14 @@ if MULTIPART_AVAILABLE:
 
         try:
             return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
+        except HTTPException:
+            raise
         except Exception as e:
             import traceback
             print(f"[File Upload Error] {traceback.format_exc()}")
             raise HTTPException(
                 status_code=500,
-                detail=f"文件信息提取失败: {str(e)}"
+                detail=str(e)
             )
 
 
@@ -546,8 +546,8 @@ async def generate_field(session_id: str, request: GenerateFieldRequest):
     if not session.uploaded_files:
         raise HTTPException(status_code=400, detail="No uploaded files found for this session")
 
-    if not _has_llm_credentials():
-        raise HTTPException(status_code=400, detail="LLM 未配置，请在设置中配置 API Key 或登录 GitHub")
+    if not has_llm_credentials():
+        raise HTTPException(status_code=400, detail="模型未配置")
 
     registry = get_registry()
     skill = registry.get(session.skill_id)
@@ -703,6 +703,8 @@ async def start_generation(session_id: str):
 
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+    _ensure_llm_configured()
 
     # 检查必填字段
     missing_fields = []

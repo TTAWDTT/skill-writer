@@ -283,6 +283,15 @@ const formatFileSize = (bytes) => {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
 }
 
+const notifyModelNotConfigured = (error) => {
+  const detail = error?.response?.data?.detail
+  if (detail === '模型未配置') {
+    alert('模型未配置')
+    return true
+  }
+  return false
+}
+
 const generateSkill = async () => {
   if (!uploadedFile.value || !skillInfo.value.name) return
 
@@ -335,6 +344,11 @@ const generateSkill = async () => {
 
   } catch (e) {
     console.error('Failed to generate skill:', e)
+    if (notifyModelNotConfigured(e)) {
+      error.value = '模型未配置'
+      isGenerating.value = false
+      return
+    }
     error.value = e.response?.data?.detail || 'Failed to generate skill. Please try again.'
     isGenerating.value = false
   }

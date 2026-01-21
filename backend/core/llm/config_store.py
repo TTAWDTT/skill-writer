@@ -146,3 +146,18 @@ def save_llm_config(config: LLMConfig) -> bool:
 def get_provider_presets() -> dict:
     """获取预设服务商列表"""
     return PROVIDER_PRESETS
+
+
+def has_llm_credentials(config: Optional[LLMConfig] = None) -> bool:
+    """判断是否已配置可用的 LLM 凭据"""
+    config = config or get_llm_config()
+    if not config.model or not config.base_url:
+        return False
+    if config.provider == LLMProviderType.GITHUB_COPILOT:
+        return bool(config.github_token)
+    if config.provider == LLMProviderType.GOOGLE_GEMINI:
+        return bool(config.api_key)
+    if config.api_key:
+        return True
+    base_url = (config.base_url or "").lower()
+    return "localhost" in base_url or "127.0.0.1" in base_url
