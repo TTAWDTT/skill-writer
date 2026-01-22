@@ -126,7 +126,7 @@
                       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
                     </svg>
                   </div>
-                  <span class="text-sm font-medium text-dark-100">Required Fields</span>
+                  <span class="text-sm font-medium text-dark-100">Requirement Fields</span>
                 </div>
                 <p class="text-2xl font-bold text-dark-300">{{ skill.requirement_fields?.length || 0 }}</p>
               </div>
@@ -243,54 +243,69 @@
           <!-- Requirements Tab -->
           <div v-show="activeTab === 'requirements'" class="space-y-4">
             <p class="text-dark-50 text-sm mb-4">
-              Before generating content, you'll need to provide the following information:
+              Provide required inputs, plus optional or inferred fields to improve output quality.
             </p>
-            <div class="grid gap-4">
-              <div
-                v-for="field in skill.requirement_fields"
-                :key="field.id"
-                class="bg-warm-100 rounded-xl p-5"
-              >
-                <div class="flex items-start justify-between mb-2">
-                  <div class="flex items-center gap-2">
-                    <span class="font-medium text-dark-300">{{ field.name }}</span>
-                    <span
-                      v-if="field.required"
-                      class="text-xs bg-red-100 text-red-600 px-2 py-0.5 rounded-full"
-                    >
-                      Required
-                    </span>
-                    <span
-                      v-else
-                      class="text-xs bg-warm-200 text-dark-50 px-2 py-0.5 rounded-full"
-                    >
-                      Optional
-                    </span>
-                  </div>
-                  <span class="text-xs bg-warm-200 text-dark-50 px-2 py-1 rounded-lg">
-                    {{ field.field_type }}
-                  </span>
-                </div>
-                <p class="text-sm text-dark-50">{{ field.description }}</p>
-                <div v-if="field.options?.length > 0" class="mt-3">
-                  <p class="text-xs font-medium text-dark-50 uppercase tracking-wider mb-2">Options</p>
-                  <div class="flex flex-wrap gap-2">
-                    <span
-                      v-for="option in field.options"
-                      :key="option"
-                      class="text-xs bg-warm-200 text-dark-100 px-2 py-1 rounded-lg"
-                    >
-                      {{ option }}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-if="!skill.requirement_fields?.length" class="text-center py-10 text-dark-50">
+            <div v-if="!hasRequirementFields" class="text-center py-10 text-dark-50">
               <svg class="w-12 h-12 mx-auto mb-3 text-warm-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
               </svg>
               <p>No specific requirements defined for this skill.</p>
+            </div>
+            <div v-else class="space-y-4">
+              <div
+                v-for="group in requirementGroups"
+                :key="group.key"
+                class="bg-warm-100 rounded-xl p-5"
+              >
+                <div class="flex items-center justify-between mb-3">
+                  <div>
+                    <p class="font-semibold text-dark-300">{{ group.label }}</p>
+                    <p class="text-xs text-dark-50">{{ group.description }}</p>
+                  </div>
+                  <span class="text-xs font-medium px-2.5 py-1 rounded-full" :class="group.badgeClass">
+                    {{ group.fields.length }}
+                  </span>
+                </div>
+                <div v-if="group.fields.length === 0" class="text-xs text-warm-400 border border-dashed border-warm-300 rounded-xl py-4 text-center">
+                  No fields in this group.
+                </div>
+                <div v-else class="space-y-3">
+                  <div
+                    v-for="field in group.fields"
+                    :key="field.id"
+                    class="bg-white border border-warm-300 rounded-xl p-4"
+                  >
+                    <div class="flex items-start justify-between mb-2">
+                      <div class="flex flex-wrap items-center gap-2">
+                        <span class="font-medium text-dark-300">{{ field.name }}</span>
+                        <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full" :class="priorityBadgeClass(field)">
+                          {{ priorityLabel(field) }}
+                        </span>
+                        <span v-if="field.collection === 'infer'" class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                          Inferred
+                        </span>
+                      </div>
+                      <span class="text-xs bg-warm-200 text-dark-50 px-2 py-1 rounded-lg">
+                        {{ field.field_type }}
+                      </span>
+                    </div>
+                    <p class="text-sm text-dark-50">{{ field.description }}</p>
+                    <p v-if="field.example" class="text-xs text-warm-400 mt-2">Example: {{ field.example }}</p>
+                    <div v-if="field.options?.length > 0" class="mt-3">
+                      <p class="text-xs font-medium text-dark-50 uppercase tracking-wider mb-2">Options</p>
+                      <div class="flex flex-wrap gap-2">
+                        <span
+                          v-for="option in field.options"
+                          :key="option"
+                          class="text-xs bg-warm-200 text-dark-100 px-2 py-1 rounded-lg"
+                        >
+                          {{ option }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
 
@@ -411,10 +426,73 @@ const tabs = [
   { id: 'guidelines', label: 'Guidelines', icon: GuidelinesIcon },
 ]
 
+const getFieldCollection = (field) => {
+  return field.collection || (field.required ? 'required' : 'optional')
+}
+
+const getFieldPriority = (field) => {
+  const value = Number(field.priority)
+  return [1, 2, 3].includes(value) ? value : 3
+}
+
+const priorityLabel = (field) => {
+  return `P${getFieldPriority(field)}`
+}
+
+const priorityBadgeClass = (field) => {
+  const priority = getFieldPriority(field)
+  if (priority === 1) return 'bg-red-100 text-red-700'
+  if (priority === 2) return 'bg-yellow-100 text-yellow-700'
+  return 'bg-warm-200 text-dark-50'
+}
+
+const sortFields = (fields) => {
+  return [...fields].sort((a, b) => {
+    const priorityDiff = getFieldPriority(a) - getFieldPriority(b)
+    if (priorityDiff !== 0) return priorityDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+}
+
 // Computed
 const renderedGuidelines = computed(() => {
   if (!skillContent.value.guidelines) return ''
   return marked(skillContent.value.guidelines)
+})
+
+const hasRequirementFields = computed(() => {
+  return (skill.value?.requirement_fields?.length || 0) > 0
+})
+
+const requirementGroups = computed(() => {
+  const fields = skill.value?.requirement_fields || []
+  const required = sortFields(fields.filter((field) => getFieldCollection(field) === 'required'))
+  const optional = sortFields(fields.filter((field) => getFieldCollection(field) === 'optional'))
+  const infer = sortFields(fields.filter((field) => getFieldCollection(field) === 'infer'))
+
+  return [
+    {
+      key: 'required',
+      label: 'Required Fields',
+      description: 'Must be provided before generation.',
+      badgeClass: 'bg-red-100 text-red-700',
+      fields: required
+    },
+    {
+      key: 'optional',
+      label: 'Optional Fields',
+      description: 'Optional but helps quality.',
+      badgeClass: 'bg-warm-200 text-dark-50',
+      fields: optional
+    },
+    {
+      key: 'infer',
+      label: 'Infer From Materials',
+      description: 'Prefer extracting from uploaded materials.',
+      badgeClass: 'bg-blue-100 text-blue-700',
+      fields: infer
+    }
+  ]
 })
 
 // Methods

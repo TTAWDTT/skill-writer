@@ -34,6 +34,8 @@ class RequirementAgent(BaseAgent):
 3. 注意信息的完整性和准确性
 4. 用专业但友好的语气交流
 5. 如果用户的回答不够详细，要引导用户补充
+6. 优先收集必填字段，按优先级从高到低提问
+7. 标记为“infer”的字段不要向用户提问
 
 当你认为信息已经足够完整时，输出 [REQUIREMENTS_COMPLETE] 标记。
 """
@@ -105,7 +107,11 @@ class RequirementAgent(BaseAgent):
     def _build_initial_prompt(self, skill: BaseSkill) -> str:
         """构建初始引导语"""
         fields = skill.requirement_fields
-        required_fields = [f for f in fields if f.required]
+        required_fields = [f for f in fields if f.collection == "required"]
+        optional_fields = [f for f in fields if f.collection == "optional"]
+
+        required_fields.sort(key=lambda f: (f.priority, f.name))
+        optional_fields.sort(key=lambda f: (f.priority, f.name))
 
         prompt = f"""您好！我是您的申报书写作助手，将帮助您撰写「{skill.metadata.name}」。
 
@@ -115,15 +121,27 @@ class RequirementAgent(BaseAgent):
         # Handle case when there are required fields
         if required_fields:
             prompt += "首先，请告诉我：\n"
-            prompt += f"1. **{required_fields[0].name}**：{required_fields[0].description or ''}\n"
+            prompt += f"1. **{required_fields[0].name}**：{required_fields[0].description or ''}"
+            if required_fields[0].example:
+                prompt += f"（示例：{required_fields[0].example}）"
+            prompt += "\n"
             if len(required_fields) > 1:
-                prompt += f"2. **{required_fields[1].name}**：{required_fields[1].description or ''}\n"
-        elif fields:
+                prompt += f"2. **{required_fields[1].name}**：{required_fields[1].description or ''}"
+                if required_fields[1].example:
+                    prompt += f"（示例：{required_fields[1].example}）"
+                prompt += "\n"
+        elif optional_fields:
             # If no required fields but there are optional fields
             prompt += "首先，请告诉我：\n"
-            prompt += f"1. **{fields[0].name}**：{fields[0].description or ''}\n"
-            if len(fields) > 1:
-                prompt += f"2. **{fields[1].name}**：{fields[1].description or ''}\n"
+            prompt += f"1. **{optional_fields[0].name}**：{optional_fields[0].description or ''}"
+            if optional_fields[0].example:
+                prompt += f"（示例：{optional_fields[0].example}）"
+            prompt += "\n"
+            if len(optional_fields) > 1:
+                prompt += f"2. **{optional_fields[1].name}**：{optional_fields[1].description or ''}"
+                if optional_fields[1].example:
+                    prompt += f"（示例：{optional_fields[1].example}）"
+                prompt += "\n"
         else:
             # No fields at all - ask for general project info
             prompt += "首先，请简单介绍一下您的项目：\n"
@@ -141,8 +159,15 @@ class RequirementAgent(BaseAgent):
         system_content += "## 需要收集的信息\n"
         for field in skill.requirement_fields:
             status = "✓ 已收集" if field.id in state.collected else "○ 待收集"
-            required_mark = "*" if field.required else ""
-            system_content += f"- {field.name}{required_mark}: {field.description} [{status}]\n"
+            if field.collection == "infer":
+                status = "※ 材料推断"
+            required_mark = "*" if field.collection == "required" else ""
+            example = f" 示例: {field.example}" if field.example else ""
+            system_content += (
+                f"- {field.name}{required_mark} "
+                f"(优先级: P{field.priority}, 层级: {field.collection}): "
+                f"{field.description}{example} [{status}]\n"
+            )
 
         system_content += "\n## 已收集的信息\n"
         if state.collected:

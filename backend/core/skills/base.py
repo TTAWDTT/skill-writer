@@ -36,8 +36,11 @@ class RequirementField(BaseModel):
     description: str
     field_type: str = "text"  # text, textarea, select, multiselect
     required: bool = True
+    collection: str = "required"  # required, optional, infer
+    priority: int = 3  # 1=高, 2=中, 3=低
     options: Optional[List[str]] = None  # 用于 select 类型
     placeholder: str = ""
+    example: str = ""
     validation_prompt: str = ""  # 用于 AI 验证输入质量
 
 
@@ -122,6 +125,40 @@ class BaseSkill(ABC):
             验证结果，包含 is_valid, issues, suggestions
         """
         pass
+
+    def get_review_prompt(
+        self,
+        section_id: str,
+        content: str,
+        requirements: Dict[str, Any],
+    ) -> str:
+        """构建章节审核提示词"""
+        section = next((s for s in self.get_flat_sections() if s.id == section_id), None)
+        section_title = section.title if section else section_id
+        evaluation_points = section.evaluation_points if section else []
+        points_text = "\n".join(f"- {p}" for p in evaluation_points) if evaluation_points else "无"
+
+        requirements_text = "\n".join(
+            f"- {k}: {v}" for k, v in requirements.items() if v
+        ) or "（暂无）"
+
+        return f"""请审核以下章节内容，检查格式、事实一致性与必填信息覆盖情况。
+
+## 章节
+{section_title}
+
+## 评审要点
+{points_text}
+
+## 已知需求
+{requirements_text}
+
+## 待审核内容
+{content}
+
+请以 JSON 输出审核结果，包含 score, passed, issues, suggestions, revised_content（可选）。
+revised_content 必须是纯文本，不允许 JSON/列表/对象。
+"""
 
     def get_flat_sections(self) -> List[Section]:
         """获取扁平化的章节列表"""

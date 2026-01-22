@@ -35,6 +35,7 @@ class DatabaseSessionStore:
                 messages=json.loads(record.messages) if record.messages else [],
                 uploaded_files=json.loads(record.uploaded_files) if record.uploaded_files else [],
                 external_information=record.external_information or "",
+                skill_overlay=json.loads(record.skill_overlay) if record.skill_overlay else None,
                 created_at=record.created_at.isoformat() if record.created_at else datetime.now().isoformat(),
                 updated_at=record.updated_at.isoformat() if record.updated_at else datetime.now().isoformat(),
                 error=record.error,
@@ -57,6 +58,7 @@ class DatabaseSessionStore:
                 record.messages = json.dumps(session.messages)
                 record.uploaded_files = json.dumps(session.uploaded_files)
                 record.external_information = session.external_information
+                record.skill_overlay = json.dumps(session.skill_overlay) if session.skill_overlay else None
                 record.final_document = session.final_document
                 record.error = session.error
                 record.updated_at = datetime.utcnow()
@@ -74,6 +76,7 @@ class DatabaseSessionStore:
                     messages=json.dumps(session.messages),
                     uploaded_files=json.dumps(session.uploaded_files),
                     external_information=session.external_information,
+                    skill_overlay=json.dumps(session.skill_overlay) if session.skill_overlay else None,
                     final_document=session.final_document,
                     error=session.error,
                 )
@@ -107,6 +110,7 @@ class DatabaseSessionStore:
                     messages=json.loads(r.messages) if r.messages else [],
                     uploaded_files=json.loads(r.uploaded_files) if r.uploaded_files else [],
                     external_information=r.external_information or "",
+                    skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),
                     error=r.error,
@@ -138,6 +142,7 @@ class DatabaseSessionStore:
                     messages=json.loads(r.messages) if r.messages else [],
                     uploaded_files=json.loads(r.uploaded_files) if r.uploaded_files else [],
                     external_information=r.external_information or "",
+                    skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),
                     error=r.error,

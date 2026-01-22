@@ -8,6 +8,7 @@ import json
 import os
 
 from sqlalchemy import Column, String, Text, DateTime, Boolean, Integer, create_engine
+from sqlalchemy import inspect, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -36,6 +37,9 @@ class Session(Base):
     # 外部信息 - 从文件中提取的额外有价值信息
     external_information = Column(Text, default="")
 
+    # 会话级 Skill 覆盖
+    skill_overlay = Column(Text, nullable=True)  # JSON
+
     # 文档
     final_document = Column(Text, nullable=True)
 
@@ -60,6 +64,7 @@ class Session(Base):
             "messages": json.loads(self.messages) if self.messages else [],
             "uploaded_files": json.loads(self.uploaded_files) if self.uploaded_files else [],
             "external_information": self.external_information or "",
+            "skill_overlay": json.loads(self.skill_overlay) if self.skill_overlay else None,
             "final_document": self.final_document,
             "error": self.error,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -117,6 +122,21 @@ class Database:
     def create_tables(self):
         """创建所有表"""
         Base.metadata.create_all(bind=self.engine)
+        self._ensure_session_columns()
+
+    def _ensure_session_columns(self):
+        """为已有数据库补齐新列"""
+        if not self.engine.url.get_backend_name().startswith("sqlite"):
+            return
+
+        inspector = inspect(self.engine)
+        if "sessions" not in inspector.get_table_names():
+            return
+
+        existing_columns = {col["name"] for col in inspector.get_columns("sessions")}
+        if "skill_overlay" not in existing_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN skill_overlay TEXT"))
 
     def get_session(self):
         """获取数据库会话"""

@@ -7,6 +7,9 @@ fields:
     description: {{field_description}}
     type: {{field_type}}  # text/textarea/select
     required: {{is_required}}  # true/false
+    collection: {{collection}}  # required/optional/infer
+    priority: {{priority}}  # 1=高, 2=中, 3=低
+    example: {{example_text}}
     placeholder: {{placeholder_text}}
     validation_prompt: {{validation_prompt}}  # 用于 AI 验证输入质量
     options:  # 仅 select 类型需要
@@ -24,6 +27,10 @@ collection_strategy:
   optional_fields:
     - {{optional_field_1}}
     - {{optional_field_2}}
+
+  # 推断字段：尽量从材料中提取
+  infer_fields:
+    - {{infer_field_1}}
 
   # 每轮最多询问的字段数
   max_fields_per_turn: 2

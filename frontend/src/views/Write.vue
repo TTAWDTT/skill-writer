@@ -65,6 +65,34 @@
           </div>
           <p class="text-xs text-blue-600 leading-relaxed line-clamp-4">{{ externalInformation }}</p>
         </div>
+
+        <!-- Skill Fixer Status -->
+        <div v-if="skillOverlay" class="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
+          <div class="flex items-center gap-2 mb-2">
+            <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span class="text-sm font-medium text-emerald-700">Skill-fixer 已应用</span>
+          </div>
+          <p class="text-xs text-emerald-700">已基于上传材料补充写作规范与章节提示，仅对本次会话生效。</p>
+          <div v-if="overlayStats" class="mt-2 flex flex-wrap gap-2">
+            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              补充规范：{{ overlayStats.hasGuidelines ? '有' : '无' }}
+            </span>
+            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              写作准则：{{ overlayStats.principles }} 条
+            </span>
+            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              章节补充：{{ overlayStats.sectionCount }} 个
+            </span>
+            <span v-if="overlayStats.hasMaterialContext" class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              材料摘要：已注入
+            </span>
+            <span v-if="overlayStats.relaxRequirements" class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
+              必填限制：已解除
+            </span>
+          </div>
+        </div>
       </div>
 
       <!-- Bottom: Requirements Form -->
@@ -79,7 +107,7 @@
             </div>
             <div>
               <h3 class="font-semibold text-dark-300">{{ skill?.name || 'Requirements' }}</h3>
-              <p class="text-xs text-dark-50">Fill in the required fields</p>
+              <p class="text-xs text-dark-50">Complete required fields. Optional and inferred fields improve quality.</p>
             </div>
           </div>
           <div class="flex items-center gap-3">
@@ -89,60 +117,85 @@
           </div>
         </div>
 
-        <!-- Required Fields Table -->
+        <!-- Requirements Tables -->
         <div class="flex-1 overflow-y-auto p-5">
-          <div v-if="requiredFields.length === 0" class="text-center text-sm text-dark-50 py-10">
-            No required fields defined for this skill.
+          <div v-if="totalFieldsCountAll === 0" class="text-center text-sm text-dark-50 py-10">
+            No requirement fields defined for this skill.
           </div>
-          <div v-else class="overflow-hidden rounded-xl border border-warm-300 bg-white">
-            <table class="w-full text-sm">
-              <thead class="bg-warm-100 text-dark-50">
-                <tr>
-                  <th class="text-left px-4 py-3 font-medium">Required Field</th>
-                  <th class="text-left px-4 py-3 font-medium w-2/3">Value</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-warm-200">
-                <tr v-for="field in requiredFields" :key="field.id" class="align-top">
-                  <td class="px-4 py-3">
-                    <div class="font-medium text-dark-300">{{ field.name }}</div>
-                    <p v-if="field.description" class="text-xs text-dark-50 mt-1">{{ field.description }}</p>
-                    <span v-if="extractedFields[field.id]" class="mt-2 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                      <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                      </svg>
-                      Auto-filled
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <div class="flex gap-3" :class="isTextareaField(field) ? 'items-start' : 'items-center'">
-                      <textarea
-                        v-if="isTextareaField(field)"
-                        v-model="formData[field.id]"
-                        :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                        rows="4"
-                        class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none transition-all"
-                      ></textarea>
-                      <input
-                        v-else
-                        v-model="formData[field.id]"
-                        :type="field.type === 'number' ? 'number' : 'text'"
-                        :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                        class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent transition-all"
-                      />
-                      <button
-                        type="button"
-                        @click="generateField(field)"
-                        :disabled="!canAutoGenerate || isGeneratingField(field.id)"
-                        class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg border border-warm-300 bg-warm-100 text-dark-100 hover:bg-warm-200 disabled:bg-warm-200 disabled:text-warm-500 disabled:cursor-not-allowed transition-all"
-                      >
-                        {{ isGeneratingField(field.id) ? '生成中...' : 'AI生成' }}
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+          <div v-else class="space-y-5">
+            <div v-for="group in fieldGroups" :key="group.key">
+              <div class="flex items-center justify-between mb-2">
+                <div>
+                  <p class="text-sm font-semibold text-dark-300">{{ group.label }}</p>
+                  <p class="text-xs text-dark-50">{{ group.description }}</p>
+                </div>
+                <span class="text-xs font-medium px-2.5 py-1 rounded-full" :class="group.badgeClass">
+                  {{ group.fields.length }}
+                </span>
+              </div>
+              <div v-if="group.fields.length === 0" class="text-xs text-warm-400 py-4 text-center border border-dashed border-warm-300 rounded-xl">
+                No fields in this group.
+              </div>
+              <div v-else class="overflow-hidden rounded-xl border border-warm-300 bg-white">
+                <table class="w-full text-sm">
+                  <thead class="bg-warm-100 text-dark-50">
+                    <tr>
+                      <th class="text-left px-4 py-3 font-medium">{{ group.tableLabel }}</th>
+                      <th class="text-left px-4 py-3 font-medium w-2/3">Value</th>
+                    </tr>
+                  </thead>
+                  <tbody class="divide-y divide-warm-200">
+                    <tr v-for="field in group.fields" :key="field.id" class="align-top">
+                      <td class="px-4 py-3">
+                        <div class="flex flex-wrap items-center gap-2">
+                          <div class="font-medium text-dark-300">{{ field.name }}</div>
+                          <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full" :class="priorityBadgeClass(field)">
+                            {{ priorityLabel(field) }}
+                          </span>
+                          <span v-if="field.collection === 'infer'" class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                            Inferred
+                          </span>
+                        </div>
+                        <p v-if="field.description" class="text-xs text-dark-50 mt-1">{{ field.description }}</p>
+                        <p v-if="field.example" class="text-xs text-warm-400 mt-2">Example: {{ field.example }}</p>
+                        <span v-if="extractedFields[field.id]" class="mt-2 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
+                          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+                          </svg>
+                          Auto-filled
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <div class="flex gap-3" :class="isTextareaField(field) ? 'items-start' : 'items-center'">
+                          <textarea
+                            v-if="isTextareaField(field)"
+                            v-model="formData[field.id]"
+                            :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
+                            rows="4"
+                            class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none transition-all"
+                          ></textarea>
+                          <input
+                            v-else
+                            v-model="formData[field.id]"
+                            :type="field.type === 'number' ? 'number' : 'text'"
+                            :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
+                            class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent transition-all"
+                          />
+                          <button
+                            type="button"
+                            @click="generateField(field)"
+                            :disabled="!canAutoGenerate || isGeneratingField(field.id)"
+                            class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg border border-warm-300 bg-warm-100 text-dark-100 hover:bg-warm-200 disabled:bg-warm-200 disabled:text-warm-500 disabled:cursor-not-allowed transition-all"
+                          >
+                            {{ isGeneratingField(field.id) ? '生成中...' : 'AI生成' }}
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -223,6 +276,22 @@
             <div class="w-full bg-warm-200 rounded-full h-2 overflow-hidden">
               <div class="bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark h-2 rounded-full progress-bar" :style="{ width: progressPercent + '%' }"></div>
             </div>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <span
+                v-for="stage in stageOrder"
+                :key="stage"
+                class="px-2.5 py-1 text-xs rounded-full border transition-colors"
+                :class="stageBadgeClass(stageState[stage])"
+              >
+                {{ stageLabels[stage] }}
+              </span>
+            </div>
+            <p v-if="currentStageLabel" class="mt-2 text-xs text-dark-50">
+              Now: {{ currentStageLabel }}
+            </p>
+            <p v-if="reviewSnapshot" class="mt-1 text-xs" :class="reviewSnapshot.passed ? 'text-green-700' : 'text-amber-700'">
+              Review score: {{ reviewSnapshot.score ?? '-' }} · {{ reviewSnapshot.passed ? 'Pass' : 'Needs revision' }}
+            </p>
           </div>
         </div>
       </Transition>
@@ -273,6 +342,21 @@ const isComplete = ref(false)
 const documentContent = ref('')
 const currentSection = ref('')
 const writingProgress = ref({ current: 0, total: 0 })
+const currentStage = ref('')
+const stageOrder = ['outline', 'draft', 'review', 'revise']
+const stageLabels = {
+  outline: 'Outline',
+  draft: 'Draft',
+  review: 'Review',
+  revise: 'Revise'
+}
+const stageState = reactive({
+  outline: 'pending',
+  draft: 'pending',
+  review: 'pending',
+  revise: 'pending'
+})
+const reviewSnapshot = ref(null)
 const showExportMenu = ref(false)
 const exportDropdown = ref(null)
 const copyButtonText = ref('Copy')
@@ -283,6 +367,7 @@ const requirementFields = ref([])
 const formData = reactive({})
 const extractedFields = ref({})
 const externalInformation = ref('')
+const skillOverlay = ref(null)
 
 // File upload state
 const fileInputRef = ref(null)
@@ -312,8 +397,73 @@ watch(documentContent, (newContent) => {
   updateRenderedDocument(newContent)
 }, { immediate: true })
 
+const getFieldCollection = (field) => {
+  return field.collection || (field.required ? 'required' : 'optional')
+}
+
+const getFieldPriority = (field) => {
+  const value = Number(field.priority)
+  return [1, 2, 3].includes(value) ? value : 3
+}
+
+const priorityLabel = (field) => {
+  return `P${getFieldPriority(field)}`
+}
+
+const priorityBadgeClass = (field) => {
+  const priority = getFieldPriority(field)
+  if (priority === 1) return 'bg-red-100 text-red-700'
+  if (priority === 2) return 'bg-yellow-100 text-yellow-700'
+  return 'bg-warm-200 text-dark-50'
+}
+
+const sortFields = (fields) => {
+  return [...fields].sort((a, b) => {
+    const priorityDiff = getFieldPriority(a) - getFieldPriority(b)
+    if (priorityDiff !== 0) return priorityDiff
+    return (a.name || '').localeCompare(b.name || '')
+  })
+}
+
 // Computed
-const requiredFields = computed(() => requirementFields.value.filter(field => field.required))
+const requiredFields = computed(() => (
+  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'required'))
+))
+
+const optionalFields = computed(() => (
+  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'optional'))
+))
+
+const inferFields = computed(() => (
+  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'infer'))
+))
+
+const fieldGroups = computed(() => ([
+  {
+    key: 'required',
+    label: 'Required Fields',
+    tableLabel: 'Required Field',
+    description: 'Must be completed before generation.',
+    badgeClass: 'bg-red-100 text-red-700',
+    fields: requiredFields.value
+  },
+  {
+    key: 'optional',
+    label: 'Optional Fields',
+    tableLabel: 'Optional Field',
+    description: 'Optional but improves quality.',
+    badgeClass: 'bg-warm-200 text-dark-50',
+    fields: optionalFields.value
+  },
+  {
+    key: 'infer',
+    label: 'Infer From Materials',
+    tableLabel: 'Inferred Field',
+    description: 'Prefer extracted from uploaded materials.',
+    badgeClass: 'bg-blue-100 text-blue-700',
+    fields: inferFields.value
+  }
+]))
 
 const filledFieldsCount = computed(() => {
   return requiredFields.value.filter(f => {
@@ -324,6 +474,8 @@ const filledFieldsCount = computed(() => {
 
 const totalFieldsCount = computed(() => requiredFields.value.length)
 
+const totalFieldsCountAll = computed(() => requirementFields.value.length)
+
 const completionBadgeClass = computed(() => {
   const ratio = totalFieldsCount.value > 0 ? filledFieldsCount.value / totalFieldsCount.value : 0
   if (ratio >= 1) return 'bg-green-100 text-green-700'
@@ -333,7 +485,6 @@ const completionBadgeClass = computed(() => {
 
 const canGenerate = computed(() => {
   return requiredFields.value.every(f => {
-    if (!f.required) return true
     const val = formData[f.id]
     return val && val.toString().trim()
   })
@@ -348,8 +499,65 @@ const progressPercent = computed(() => {
   return Math.round(writingProgress.value.current / writingProgress.value.total * 100)
 })
 
+const currentStageLabel = computed(() => stageLabels[currentStage.value] || '')
+
+const overlayStats = computed(() => {
+  if (!skillOverlay.value) return null
+  const guidelineText = (skillOverlay.value.writing_guidelines_additions || '').trim()
+  const principles = Array.isArray(skillOverlay.value.global_principles)
+    ? skillOverlay.value.global_principles.filter(item => item && item.toString().trim()).length
+    : 0
+  const sectionOverrides = skillOverlay.value.section_overrides || {}
+  const sectionCount = typeof sectionOverrides === 'object'
+    ? Object.keys(sectionOverrides).filter(key => sectionOverrides[key] && sectionOverrides[key].toString().trim()).length
+    : 0
+  const materialContext = (skillOverlay.value.material_context || '').trim()
+  return {
+    hasGuidelines: !!guidelineText,
+    principles,
+    sectionCount,
+    relaxRequirements: !!skillOverlay.value.relax_requirements,
+    hasMaterialContext: !!materialContext,
+  }
+})
+
 const isTextareaField = (field) => {
   return field.type === 'textarea' || (field.description && field.description.length > 50)
+}
+
+const resetStageState = () => {
+  stageOrder.forEach((stage) => {
+    stageState[stage] = 'pending'
+  })
+  currentStage.value = ''
+  reviewSnapshot.value = null
+}
+
+const stageBadgeClass = (status) => {
+  if (status === 'active') return 'bg-anthropic-orange/10 border-anthropic-orange text-anthropic-orange-dark'
+  if (status === 'done') return 'bg-green-50 border-green-200 text-green-700'
+  if (status === 'skipped') return 'bg-warm-100 border-warm-200 text-warm-400'
+  return 'bg-warm-50 border-warm-200 text-warm-400'
+}
+
+const setStageStart = (stage) => {
+  stageOrder.forEach((key) => {
+    if (stageState[key] === 'active') {
+      stageState[key] = 'done'
+    }
+  })
+  stageState[stage] = 'active'
+  currentStage.value = stage
+}
+
+const setStageComplete = (stage, willRevise) => {
+  stageState[stage] = 'done'
+  if (stage === 'review' && !willRevise) {
+    stageState.revise = 'skipped'
+  }
+  if (currentStage.value === stage) {
+    currentStage.value = ''
+  }
 }
 
 const getDocumentTitle = () => {
@@ -427,6 +635,7 @@ const startSession = async () => {
     })
     sessionId.value = response.data.session_id
     savedDocumentId.value = null
+    skillOverlay.value = null
     await fetchRequirements()
     await fetchSessionFiles()
   } catch (e) {
@@ -546,6 +755,7 @@ const startStreamGeneration = async () => {
   isWriting.value = true
   documentContent.value = ''
   writingProgress.value = { current: 0, total: 0 }
+  resetStageState()
 
   try {
     const eventSource = new EventSource(`/api/chat/generate/${sessionId.value}/stream`)
@@ -562,12 +772,27 @@ const startStreamGeneration = async () => {
         case 'section_start':
           currentSection.value = data.section_title
           writingProgress.value.current = data.section_index
+          resetStageState()
           if (documentContent.value && !documentContent.value.endsWith('\n\n')) {
             documentContent.value += '\n\n'
           }
           const level = data.section_level || 1
           const heading = '#'.repeat(level) + ' ' + data.section_title
           documentContent.value += heading + '\n\n'
+          break
+
+        case 'stage_start':
+          setStageStart(data.stage)
+          break
+
+        case 'stage_complete':
+          setStageComplete(data.stage, data.will_revise)
+          if (data.stage === 'review') {
+            reviewSnapshot.value = {
+              score: data.score,
+              passed: data.passed
+            }
+          }
           break
 
         case 'chunk':
@@ -578,6 +803,7 @@ const startStreamGeneration = async () => {
           isWriting.value = false
           isComplete.value = true
           currentSection.value = ''
+          resetStageState()
           documentContent.value = data.document
           closeEventSource()
           saveDocument()
@@ -585,6 +811,7 @@ const startStreamGeneration = async () => {
 
         case 'error':
           isWriting.value = false
+          resetStageState()
           closeEventSource()
           alert(`Generation failed: ${data.error}`)
           break
@@ -593,6 +820,7 @@ const startStreamGeneration = async () => {
 
     eventSource.onerror = () => {
       isWriting.value = false
+      resetStageState()
       closeEventSource()
     }
 
@@ -661,13 +889,14 @@ const uploadFiles = async (files) => {
 
     if (result.success) {
       const extracted = result.extracted_fields || {}
-      const requiredIds = new Set(requiredFields.value.map(field => field.id))
+      const fieldIds = new Set(requirementFields.value.map(field => field.id))
       let extractedCount = 0
 
       Object.entries(extracted).forEach(([key, value]) => {
-        if (!requiredIds.has(key)) return
+        if (!fieldIds.has(key)) return
         if (value && value.toString().trim()) {
-          formData[key] = value
+          const field = requirementFields.value.find((item) => item.id === key)
+          formData[key] = normalizeFieldValue(value, field || { id: key, type: 'text' })
           extractedFields.value[key] = value
           extractedCount++
         }
@@ -763,17 +992,73 @@ const normalizeFields = (fields) => {
   return (fields || []).map((field) => ({
     ...field,
     type: field.type || field.field_type || 'text',
+    collection: field.collection || (field.required ? 'required' : 'optional'),
+    priority: Number(field.priority) || 3,
+    example: field.example || '',
   }))
+}
+
+const normalizeFieldValue = (value, field) => {
+  if (value === null || value === undefined) return ''
+  const fieldId = field?.id || ''
+  const fieldName = field?.name || ''
+  const nameHint = `${fieldId} ${fieldName}`.toLowerCase()
+  const prefersTitle = ['title', 'name', '名称', '标题', '题目'].some(token => nameHint.includes(token))
+  if (typeof value !== 'string') {
+    if (Array.isArray(value)) return value.join(field.type === 'textarea' ? '\n' : '、')
+    if (typeof value === 'object') return JSON.stringify(value, null, 2)
+    return String(value)
+  }
+
+  const trimmed = value.trim()
+  if (!trimmed) return ''
+  if (!(trimmed.startsWith('{') || trimmed.startsWith('['))) return value
+
+  let parsed = null
+  try {
+    parsed = JSON.parse(trimmed)
+  } catch (e) {
+    return value
+  }
+
+  if (Array.isArray(parsed)) {
+    return parsed.map(item => (typeof item === 'string' ? item : JSON.stringify(item))).join(field.type === 'textarea' ? '\n' : '、')
+  }
+
+  if (parsed && typeof parsed === 'object') {
+    if (fieldId && parsed[fieldId]) return String(parsed[fieldId])
+    const keys = Object.keys(parsed)
+    if (keys.length === 1) return String(parsed[keys[0]])
+    const titleKeys = ['title', 'name', '标题', '名称', 'topic', 'subject', '项目名称', '课题名称', 'project_title', 'projectname', 'project']
+    const contentKeys = ['content', '正文', '内容', 'text', 'body', 'detail', 'details', 'description', 'summary', '简介', '说明', '背景']
+    const orderedKeys = prefersTitle ? [...titleKeys, ...contentKeys] : [...contentKeys, ...titleKeys]
+    const normalizedKeys = keys.reduce((acc, key) => {
+      acc[key.toString().toLowerCase()] = key
+      return acc
+    }, {})
+    for (const key of orderedKeys) {
+      if (parsed[key]) return String(parsed[key])
+      const normalizedKey = key.toLowerCase()
+      if (normalizedKeys[normalizedKey] && parsed[normalizedKeys[normalizedKey]]) {
+        return String(parsed[normalizedKeys[normalizedKey]])
+      }
+      const partial = keys.find((rawKey) => rawKey.toLowerCase().includes(normalizedKey))
+      if (partial && parsed[partial]) return String(parsed[partial])
+    }
+  }
+
+  return value
 }
 
 const applyRequirementsPayload = (payload) => {
   requirementFields.value = normalizeFields(payload.fields)
   externalInformation.value = payload.external_information || ''
+  skillOverlay.value = payload.skill_overlay || null
 
   const existingReqs = payload.requirements || {}
   requirementFields.value.forEach((field) => {
     if (Object.prototype.hasOwnProperty.call(existingReqs, field.id)) {
-      formData[field.id] = existingReqs[field.id] ?? ''
+      formData[field.id] = normalizeFieldValue(existingReqs[field.id], field)
     } else if (!(field.id in formData)) {
       formData[field.id] = ''
     }

@@ -5,8 +5,9 @@ Chat API 路由
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any, Dict
 from pathlib import Path
+import re
 import json
 
 from backend.core.workflow import get_workflow
@@ -16,6 +17,7 @@ from backend.core.agents.file_extractor import (
     extract_info_from_multiple_files,
     generate_field_from_files,
 )
+from backend.core.agents.skill_fixer_agent import SkillFixerAgent
 from backend.core.llm.config_store import has_llm_credentials
 
 try:
@@ -245,16 +247,208 @@ async def get_session_document(session_id: str):
     }
 
 def _build_skill_fields(skill) -> List[dict]:
-    required_fields = [f for f in skill.requirement_fields if f.required]
-    target_fields = required_fields if required_fields else skill.requirement_fields
+    target_fields = list(skill.requirement_fields)
+
+    collection_rank = {"required": 0, "infer": 1, "optional": 2}
+    target_fields.sort(
+        key=lambda f: (
+            collection_rank.get(f.collection, 2),
+            f.priority,
+            f.name,
+        )
+    )
     return [
         {
             "id": f.id,
             "name": f.name,
             "description": f.description,
+            "type": f.field_type,
+            "required": f.required,
+            "collection": f.collection,
+            "priority": f.priority,
+            "example": f.example,
         }
         for f in target_fields
     ]
+
+
+def _try_parse_json_value(value: Any):
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    if not stripped:
+        return value
+
+    candidates = []
+    if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+        candidates.append(stripped)
+
+    fence_matches = re.findall(r"```(?:json)?\s*([\s\S]*?)\s*```", stripped)
+    candidates.extend(fence_matches)
+
+    for pattern in (r"\{[\s\S]*?\}", r"\[[\s\S]*?\]"):
+        match = re.search(pattern, stripped)
+        if match:
+            candidates.append(match.group())
+
+    for candidate in candidates:
+        try:
+            return json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+
+    return value
+
+
+def _flatten_list_value(values: list, field_type: str, field_id: str) -> str:
+    separator = "\n" if field_type == "textarea" else "、"
+    parts = []
+    for item in values:
+        normalized = _normalize_extracted_value(item, field_type, "", field_id)
+        if normalized is None:
+            continue
+        parts.append(str(normalized))
+    return separator.join(parts).strip()
+
+
+def _normalize_key(text: str) -> str:
+    return re.sub(r"[^0-9a-zA-Z\u4e00-\u9fff]+", "", str(text)).lower()
+
+
+def _find_partial_key(tokens: list, key_lookup_normalized: dict) -> Optional[str]:
+    for token in tokens:
+        normalized_token = _normalize_key(token)
+        if not normalized_token:
+            continue
+        for normalized_key, original in key_lookup_normalized.items():
+            if normalized_token in normalized_key:
+                return original
+    return None
+
+
+def _extract_value_from_unparsed_json(text: str, keys: list) -> Optional[str]:
+    if not isinstance(text, str):
+        return None
+    if not keys:
+        return None
+
+    for key in keys:
+        if not key:
+            continue
+        escaped = re.escape(str(key))
+        patterns = [
+            rf'"{escaped}"\s*:\s*"([\s\S]*?)"',
+            rf"'{escaped}'\s*:\s*'([\s\S]*?)'",
+            rf'“{escaped}”\s*:\s*“([\s\S]*?)”',
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, text)
+            if match:
+                return match.group(1).strip()
+
+    return None
+
+
+def _flatten_dict_value(value_map: dict, field_type: str, field_name: str, field_id: str) -> str:
+    if not value_map:
+        return ""
+
+    name_hint = (field_name or "").lower()
+    prefer_title = field_type != "textarea" and any(k in name_hint for k in ["name", "title", "名称", "标题", "题目"])
+    content_keys = ["content", "正文", "内容", "text", "body", "detail", "details", "description", "summary", "简介", "说明", "背景"]
+    title_keys = ["title", "标题", "name", "名称", "topic", "subject", "项目名称", "课题名称"]
+
+    key_order = title_keys + content_keys if prefer_title else content_keys + title_keys
+    key_lookup = {str(k).lower(): k for k in value_map.keys()}
+    key_lookup_normalized = {_normalize_key(k): k for k in value_map.keys()}
+    field_id_key = _normalize_key(field_id)
+    field_name_key = _normalize_key(field_name)
+
+    if field_id_key in key_lookup_normalized:
+        raw_value = value_map.get(key_lookup_normalized[field_id_key])
+        normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+        return str(normalized).strip() if normalized is not None else ""
+
+    if field_name_key and field_name_key in key_lookup_normalized:
+        raw_value = value_map.get(key_lookup_normalized[field_name_key])
+        normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+        return str(normalized).strip() if normalized is not None else ""
+
+    partial_key = _find_partial_key([field_id, field_name], key_lookup_normalized)
+    if partial_key:
+        raw_value = value_map.get(partial_key)
+        normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+        return str(normalized).strip() if normalized is not None else ""
+
+    for key in key_order:
+        if key in key_lookup:
+            raw_value = value_map.get(key_lookup[key])
+            normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+            if normalized is None:
+                continue
+            return str(normalized).strip()
+
+    partial_key = _find_partial_key(key_order, key_lookup_normalized)
+    if partial_key:
+        raw_value = value_map.get(partial_key)
+        normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+        return str(normalized).strip() if normalized is not None else ""
+
+    if len(value_map) == 1:
+        only_value = next(iter(value_map.values()))
+        normalized = _normalize_extracted_value(only_value, field_type, field_name, field_id)
+        return str(normalized).strip() if normalized is not None else ""
+
+    separator = "\n" if field_type == "textarea" else "，"
+    parts = []
+    for key, raw_value in value_map.items():
+        normalized = _normalize_extracted_value(raw_value, field_type, field_name, field_id)
+        if normalized is None:
+            continue
+        parts.append(f"{key}: {normalized}")
+    return separator.join(parts).strip()
+
+
+def _normalize_extracted_value(value: Any, field_type: str, field_name: str, field_id: str) -> Any:
+    if value is None:
+        return None
+
+    parsed = _try_parse_json_value(value)
+
+    if isinstance(parsed, dict):
+        return _flatten_dict_value(parsed, field_type, field_name, field_id)
+    if isinstance(parsed, list):
+        return _flatten_list_value(parsed, field_type, field_id)
+    if isinstance(parsed, str):
+        stripped = parsed.strip()
+        if stripped.startswith("{") or stripped.startswith("["):
+            title_keys = ["title", "name", "标题", "名称", "topic", "subject", "项目名称", "课题名称", "project_title"]
+            content_keys = ["content", "正文", "内容", "text", "body", "detail", "details", "description", "summary", "简介", "说明", "背景"]
+            key_candidates = [field_id, field_name] + title_keys + content_keys
+            extracted = _extract_value_from_unparsed_json(stripped, key_candidates)
+            if extracted:
+                return extracted
+
+    return parsed
+
+
+def _normalize_extracted_fields(extracted_fields: Dict[str, Any], skill) -> Dict[str, Any]:
+    if not extracted_fields:
+        return {}
+
+    field_map = {f.id: f for f in skill.requirement_fields}
+    normalized = {}
+    for field_id, value in extracted_fields.items():
+        field = field_map.get(field_id)
+        field_type = field.field_type if field else "text"
+        field_name = field.name if field else field_id
+        normalized_value = _normalize_extracted_value(value, field_type, field_name, field_id)
+        if normalized_value is None:
+            continue
+        if isinstance(normalized_value, str) and not normalized_value.strip():
+            continue
+        normalized[field_id] = normalized_value
+    return normalized
 
 
 def _trim_file_content(content: str, max_chars: int = 20000) -> str:
@@ -302,6 +496,11 @@ async def _handle_parsed_upload(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"文件信息提取失败: {str(e)}") from e
 
+    extraction_result["extracted_fields"] = _normalize_extracted_fields(
+        extraction_result.get("extracted_fields", {}),
+        skill,
+    )
+
     # 更新会话状态
     for pf in parsed_files:
         session.add_uploaded_file({
@@ -316,6 +515,26 @@ async def _handle_parsed_upload(
     external_info = extraction_result.get("external_information", "")
     if external_info:
         session.append_external_info(external_info)
+
+    # 基于上传材料修补 Skill（仅当前会话）
+    try:
+        fixer = SkillFixerAgent()
+        fixer_result = await fixer.run(
+            skill=skill,
+            extracted_fields=extraction_result.get("extracted_fields", {}),
+            external_information=session.external_information,
+            file_summaries=extraction_result.get("summaries", ""),
+        )
+        session.skill_overlay = {
+            "writing_guidelines_additions": fixer_result.writing_guidelines_additions,
+            "global_principles": fixer_result.global_principles,
+            "section_overrides": fixer_result.section_overrides,
+            "relax_requirements": fixer_result.relax_requirements,
+            "material_context": fixer_result.material_context,
+            "section_prompt_overrides": fixer_result.section_prompt_overrides,
+        }
+    except Exception as e:
+        print(f"[Skill Fixer Warning] {e}")
 
     # 将提取的字段合并到需求中
     extracted_fields = extraction_result.get("extracted_fields", {})
@@ -583,6 +802,7 @@ async def generate_field(session_id: str, request: GenerateFieldRequest):
     )
 
     value = result.get("value")
+    value = _normalize_extracted_value(value, field.field_type, field.name, field.id)
     if value is None or (isinstance(value, str) and not value.strip()):
         return {
             "success": False,
@@ -663,6 +883,12 @@ async def get_requirements(session_id: str):
 
     fields = []
     if skill:
+        if session.requirements:
+            normalized_requirements = _normalize_extracted_fields(session.requirements, skill)
+            if normalized_requirements != session.requirements:
+                session.requirements = normalized_requirements
+                workflow.save_session(session)
+
         fields = [
             {
                 "id": f.id,
@@ -670,16 +896,25 @@ async def get_requirements(session_id: str):
                 "description": f.description,
                 "type": f.field_type,
                 "required": f.required,
+                "collection": f.collection,
+                "priority": f.priority,
+                "example": f.example,
                 "placeholder": f.placeholder,
             }
             for f in skill.requirement_fields
         ]
+        if session.skill_overlay and session.skill_overlay.get("relax_requirements"):
+            for field in fields:
+                field["required"] = False
+                if field.get("collection") == "required":
+                    field["collection"] = "optional"
 
     return {
         "session_id": session_id,
         "requirements": session.requirements or {},
         "fields": fields,
         "external_information": session.external_information,
+        "skill_overlay": session.skill_overlay,
     }
 
 
@@ -710,11 +945,12 @@ async def start_generation(session_id: str):
     missing_fields = []
     requirements = session.requirements or {}
 
-    for field in skill.requirement_fields:
-        if field.required:
-            value = requirements.get(field.id)
-            if not value or (isinstance(value, str) and not value.strip()):
-                missing_fields.append(field.name)
+    if not (session.skill_overlay and session.skill_overlay.get("relax_requirements")):
+        for field in skill.requirement_fields:
+            if field.required:
+                value = requirements.get(field.id)
+                if not value or (isinstance(value, str) and not value.strip()):
+                    missing_fields.append(field.name)
 
     if missing_fields:
         return {

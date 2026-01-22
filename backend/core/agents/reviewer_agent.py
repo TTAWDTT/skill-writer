@@ -93,6 +93,38 @@ class ReviewerAgent(BaseAgent):
 请以 JSON 格式输出审核结果。
 """
 
+    def _normalize_revised_content(self, value: Any) -> Optional[str]:
+        if value is None:
+            return None
+        if isinstance(value, str):
+            text = value.strip()
+            if not text:
+                return None
+            json_match = re.search(r'\{[\s\S]*\}|\[[\s\S]*\]', text)
+            if json_match:
+                try:
+                    data = json.loads(json_match.group())
+                    return self._normalize_revised_content(data)
+                except json.JSONDecodeError:
+                    return text
+            return text
+        if isinstance(value, list):
+            parts = []
+            for item in value:
+                normalized = self._normalize_revised_content(item)
+                if normalized:
+                    parts.append(normalized)
+            return "\n".join(parts) if parts else None
+        if isinstance(value, dict):
+            content_keys = ["content", "正文", "内容", "text", "body", "detail", "details", "description", "summary", "section"]
+            for key in content_keys:
+                if key in value:
+                    return self._normalize_revised_content(value.get(key))
+            if len(value) == 1:
+                return self._normalize_revised_content(next(iter(value.values())))
+            return None
+        return str(value).strip() or None
+
     def _parse_result(self, section_id: str, response: str) -> ReviewResult:
         """解析 LLM 返回的审核结果"""
         try:
@@ -100,13 +132,14 @@ class ReviewerAgent(BaseAgent):
             json_match = re.search(r'\{[\s\S]*\}', response)
             if json_match:
                 data = json.loads(json_match.group())
+                revised_content = self._normalize_revised_content(data.get("revised_content"))
                 return ReviewResult(
                     section_id=section_id,
                     score=data.get("score", 70),
                     passed=data.get("passed", False),
                     issues=data.get("issues", []),
                     suggestions=data.get("suggestions", []),
-                    revised_content=data.get("revised_content"),
+                    revised_content=revised_content,
                 )
         except (json.JSONDecodeError, KeyError):
             pass

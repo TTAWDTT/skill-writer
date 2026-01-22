@@ -47,6 +47,9 @@ class SessionState:
     # 外部信息 - 从文件中提取的额外有价值信息
     external_information: str = ""
 
+    # 会话级 Skill 覆盖（仅对当前会话生效）
+    skill_overlay: Optional[Dict] = None
+
     # 时间戳
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())

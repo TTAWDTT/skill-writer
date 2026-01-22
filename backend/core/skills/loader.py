@@ -212,14 +212,33 @@ class FileBasedSkill(BaseSkill):
         """返回需求收集字段"""
         result = []
         for f in self._requirements_config.get('fields', []):
+            collection = f.get('collection')
+            required = f.get('required', True)
+            if not collection:
+                collection = "required" if required else "optional"
+            if collection not in {"required", "optional", "infer"}:
+                collection = "required" if required else "optional"
+            if collection == "infer":
+                required = False
+
+            try:
+                priority = int(f.get('priority', 3))
+            except (TypeError, ValueError):
+                priority = 3
+            if priority not in {1, 2, 3}:
+                priority = 3
+
             field = RequirementField(
                 id=f.get('id', ''),
                 name=f.get('name', ''),
                 description=f.get('description', ''),
                 field_type=f.get('type', 'text'),
-                required=f.get('required', True),
+                required=required,
+                collection=collection,
+                priority=priority,
                 options=f.get('options'),
                 placeholder=f.get('placeholder', ''),
+                example=f.get('example', ''),
                 validation_prompt=f.get('validation_prompt', ''),
             )
             result.append(field)

@@ -9,6 +9,7 @@ import uuid
 
 from backend.core.skills.registry import get_registry
 from backend.core.skills.base import BaseSkill
+from backend.core.skills.overlay import apply_skill_overlay
 from backend.core.agents.requirement_agent import RequirementAgent, RequirementState
 from backend.core.agents.writer_agent import WriterAgent, WritingState
 from backend.core.agents.reviewer_agent import ReviewerAgent
@@ -118,6 +119,7 @@ class SimpleWorkflow:
         skill = self.registry.get(session.skill_id)
         if not skill:
             return {"error": f"Skill 不存在: {session.skill_id}"}
+        skill = apply_skill_overlay(skill, session.skill_overlay)
 
         # 记录用户消息
         session.messages.append({
@@ -204,16 +206,50 @@ class SimpleWorkflow:
             return {"error": f"Skill 不存在: {session.skill_id}"}
 
         try:
-            # 执行写作
-            result = await self.writer_agent.run(
-                skill=skill,
-                requirements=session.requirements,
+            flat_sections = skill.get_flat_sections()
+            state = WritingState(
+                skill_id=skill.metadata.id,
+                requirements=session.requirements or {},
+                total_sections=len(flat_sections),
                 external_information=session.external_information,
             )
+            session.sections = {}
+            session.review_results = {}
 
-            session.writing_state = asdict(result["state"])
-            session.sections = result["state"].sections
-            session.final_document = result["content"]
+            contents = []
+            for section in flat_sections:
+                state.current_section = section.id
+                section_result = await self.writer_agent.write_section_with_review(
+                    skill=skill,
+                    section=section,
+                    requirements=session.requirements or {},
+                    state=state,
+                    reviewer_agent=self.reviewer_agent,
+                )
+
+                content = section_result["content"]
+                review = section_result["review"]
+                state.sections[section.id] = content
+                state.completed_sections.append(section.id)
+                session.sections[section.id] = content
+                session.review_results[section.id] = {
+                    "section_id": section.id,
+                    "outline": section_result["outline"],
+                    "draft": section_result["draft"],
+                    "score": review.score,
+                    "passed": review.passed,
+                    "issues": review.issues,
+                    "suggestions": review.suggestions,
+                    "revised_content": review.revised_content,
+                    "revised": section_result["revised"],
+                }
+
+                heading = "#" * section.level + " " + section.title
+                contents.append(f"{heading}\n\n{content}")
+
+            combined = "\n\n".join(contents)
+            session.writing_state = asdict(state)
+            session.final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
             session.phase = "complete"
             self.store.save(session)
 
@@ -222,7 +258,7 @@ class SimpleWorkflow:
                 "phase": "complete",
                 "message": "文档生成完成！",
                 "is_complete": True,
-                "document": result["content"],
+                "document": session.final_document,
             }
 
         except Exception as e:
@@ -251,6 +287,7 @@ class SimpleWorkflow:
         if not skill:
             yield {"type": "error", "error": f"Skill 不存在: {session.skill_id}"}
             return
+        skill = apply_skill_overlay(skill, session.skill_overlay)
 
         # 发送开始事件
         yield {
@@ -261,6 +298,14 @@ class SimpleWorkflow:
 
         try:
             flat_sections = skill.get_flat_sections()
+            state = WritingState(
+                skill_id=skill.metadata.id,
+                requirements=session.requirements or {},
+                total_sections=len(flat_sections),
+                external_information=session.external_information,
+            )
+            session.sections = {}
+            session.review_results = {}
             all_content = []
 
             for i, section in enumerate(flat_sections):
@@ -274,39 +319,126 @@ class SimpleWorkflow:
                     "total_sections": len(flat_sections),
                 }
 
-                # 构建上下文
-                context = {
-                    "requirements": session.requirements,
-                    "written_sections": session.sections,
-                    "external_information": session.external_information,
+                yield {
+                    "type": "stage_start",
+                    "stage": "outline",
+                    "section_id": section.id,
+                    "section_title": section.title,
+                }
+                outline = await self.writer_agent.generate_outline(
+                    skill=skill,
+                    section=section,
+                    requirements=session.requirements or {},
+                    state=state,
+                )
+                yield {
+                    "type": "stage_complete",
+                    "stage": "outline",
+                    "section_id": section.id,
+                    "section_title": section.title,
                 }
 
-                # 获取章节 prompt
-                prompt = skill.get_section_prompt(section, context)
+                yield {
+                    "type": "stage_start",
+                    "stage": "draft",
+                    "section_id": section.id,
+                    "section_title": section.title,
+                }
+                draft = await self.writer_agent.generate_draft(
+                    skill=skill,
+                    section=section,
+                    requirements=session.requirements or {},
+                    state=state,
+                    outline=outline,
+                )
+                yield {
+                    "type": "stage_complete",
+                    "stage": "draft",
+                    "section_id": section.id,
+                    "section_title": section.title,
+                }
 
-                messages = [
-                    {"role": "system", "content": self._get_system_prompt(skill)},
-                    {"role": "user", "content": prompt}
-                ]
+                yield {
+                    "type": "stage_start",
+                    "stage": "review",
+                    "section_id": section.id,
+                    "section_title": section.title,
+                }
+                review = await self.reviewer_agent.run(
+                    skill=skill,
+                    section_id=section.id,
+                    content=draft,
+                    requirements=session.requirements or {},
+                )
+                should_revise = not review.revised_content and (not review.passed or review.score < 80)
+                yield {
+                    "type": "stage_complete",
+                    "stage": "review",
+                    "section_id": section.id,
+                    "section_title": section.title,
+                    "score": review.score,
+                    "passed": review.passed,
+                    "will_revise": should_revise,
+                }
 
-                # 流式生成
-                section_content = ""
-                async for chunk in self.writer_agent._chat_stream(messages, temperature=0.5):
-                    section_content += chunk
+                final_content = draft
+                revised = False
+                if review.revised_content:
+                    final_content = review.revised_content
+                    revised = True
+                elif should_revise:
                     yield {
-                        "type": "chunk",
+                        "type": "stage_start",
+                        "stage": "revise",
                         "section_id": section.id,
-                        "content": chunk,
+                        "section_title": section.title,
                     }
+                    final_content = await self.writer_agent.revise_section(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                        draft=draft,
+                        issues=review.issues,
+                        suggestions=review.suggestions,
+                    )
+                    yield {
+                        "type": "stage_complete",
+                        "stage": "revise",
+                        "section_id": section.id,
+                        "section_title": section.title,
+                    }
+                    revised = True
 
-                section_content = self.writer_agent._postprocess_section(section, section_content)
+                final_content = self.writer_agent._postprocess_section(section, final_content)
 
                 # 保存章节内容
-                session.sections[section.id] = section_content
+                state.sections[section.id] = final_content
+                state.completed_sections.append(section.id)
+                session.sections[section.id] = final_content
+                session.review_results[section.id] = {
+                    "section_id": section.id,
+                    "outline": outline,
+                    "draft": draft,
+                    "score": review.score,
+                    "passed": review.passed,
+                    "issues": review.issues,
+                    "suggestions": review.suggestions,
+                    "revised_content": review.revised_content,
+                    "revised": revised,
+                }
+                session.writing_state = asdict(state)
+                self.store.save(session)
+
+                yield {
+                    "type": "chunk",
+                    "section_id": section.id,
+                    "content": final_content,
+                }
 
                 # 格式化为 Markdown
                 heading = "#" * section.level + " " + section.title
-                all_content.append(f"{heading}\n\n{section_content}")
+                all_content.append(f"{heading}\n\n{final_content}")
 
                 # 发送章节完成事件
                 yield {

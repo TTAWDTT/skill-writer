@@ -5,8 +5,9 @@
 ## 核心特性
 
 - **Skill 系统**：每种文书类型对应一个 Skill，包含结构模板、写作规范、评审要点
-- **需求理解**：多轮对话澄清用户需求，确保准确把控意图
-- **高质量写作**：多 Agent 协作（起草→审核→修改）
+- **需求理解**：分层字段（必填/选填/推断）+ 多轮对话澄清
+- **高质量写作**：多 Agent 协作（提纲 → 草稿 → 审核 → 修订）
+- **文件提取**：上传材料自动抽取字段并补充外部信息
 - **可扩展**：支持学习新的文书类型并创建新 Skill
 
 ## 项目结构
@@ -18,14 +19,15 @@ skill-writer/
 │   │   ├── skills/          # Skill 定义
 │   │   │   ├── base.py      # Skill 基类
 │   │   │   ├── registry.py  # Skill 注册表
-│   │   │   └── nsfc.py      # 国自然申报书 Skill
+│   │   │   └── loader.py    # 文件化 Skill 加载
 │   │   ├── agents/          # Agent 实现
 │   │   │   ├── base.py
 │   │   │   ├── requirement_agent.py
 │   │   │   ├── writer_agent.py
 │   │   │   └── reviewer_agent.py
 │   │   └── workflow/        # 工作流编排
-│   │       └── document_workflow.py
+│   │       ├── simple_workflow.py
+│   │       └── state.py
 │   ├── api/                 # FastAPI 路由
 │   │   ├── main.py
 │   │   └── routes/
@@ -37,8 +39,10 @@ skill-writer/
 │   │   ├── api/
 │   │   └── router/
 │   └── package.json
-└── data/
-    └── skills/              # Skill 数据和范例
+├── backend/data/
+│   └── skills/              # Skill 数据和范例
+├── workflow_diagram.png     # 工作流图
+└── workflow_design_philosophy.md
 ```
 
 ## 快速开始
@@ -74,23 +78,31 @@ npm run dev
 ## API 接口
 
 ### Skills API
+
 - `GET /api/skills/` - 获取所有可用 Skill
 - `GET /api/skills/{skill_id}` - 获取 Skill 详情
+- `POST /api/skills/create-from-template` - 上传模板生成 Skill
 
 ### Chat API
-- `POST /api/chat/` - 与写作助手对话
-- `GET /api/chat/session/{session_id}` - 获取会话状态
+
+- `POST /api/chat/start` - 创建会话
+- `GET /api/chat/session/{session_id}/requirements` - 获取需求字段
+- `PUT /api/chat/session/{session_id}/requirements` - 保存需求字段
+- `POST /api/chat/session/{session_id}/upload-json` - 上传文件提取信息
+- `POST /api/chat/session/{session_id}/start-generation` - 开始生成
+- `GET /api/chat/generate/{session_id}/stream` - SSE 流式生成
 
 ### Documents API
+
 - `GET /api/documents/` - 获取文档列表
 - `POST /api/documents/` - 创建文档
 - `GET /api/documents/{doc_id}` - 获取文档详情
 
 ## 添加新的 Skill
 
-1. 在 `backend/core/skills/` 目录下创建新文件
-2. 继承 `BaseSkill` 类并实现必要方法
-3. 使用 `@register_skill` 装饰器注册
+1. 在 `backend/data/skills/` 创建 Skill 目录
+2. 添加 `SKILL.md` / `requirements.yaml` / `structure.yaml` / `guidelines.md`
+3. 启动后会自动加载
 
 ```python
 from backend.core.skills import BaseSkill, register_skill
@@ -117,25 +129,30 @@ class MyNewSkill(BaseSkill):
 ## 架构说明
 
 ### Skill 系统
+
 每个 Skill 定义了一种文书类型，包含：
+
 - **元数据**：名称、描述、标签等
 - **结构模板**：文书的章节结构
 - **需求字段**：需要收集的用户信息
 - **写作风格**：语言风格、禁忌词等
 
 ### Agent 系统
+
 - **RequirementAgent**：通过对话收集用户需求
-- **WriterAgent**：根据需求生成文档内容
+- **WriterAgent**：根据需求生成文档内
 - **ReviewerAgent**：审核生成的内容质量
 
 ### 工作流
-使用 LangGraph 编排完整的文书生成流程：
+
+系统采用简化工作流（非 LangGraph），并支持流式 SSE：
+
 ```
-初始化 → 需求收集 → 内容生成 → 审核 → 最终化
+start_session → collect_requirements → start_generation → outline → draft → review → revise → assemble → complete
 ```
 
 ## 技术栈
 
-- **后端**：FastAPI, LangGraph, LangChain, OpenAI API
+- **后端**：FastAPI, LangChain, OpenAI API
 - **前端**：Vue 3, Tailwind CSS, Vite
 - **状态管理**：Pinia

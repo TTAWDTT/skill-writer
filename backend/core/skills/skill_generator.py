@@ -74,6 +74,7 @@ SKILL_CREATOR_SYSTEM_PROMPT = """你是一个专门分析文书模板并创建�
 - `[项目名称]`、`____` 等填空位置
 - 需要用户提供的核心信息
 - 可以从其他字段推导的信息（不作为字段）
+- 标记字段收集层级：必填 / 选填 / 可从材料推断
 
 ## 输出格式
 
@@ -106,6 +107,9 @@ SKILL_CREATOR_SYSTEM_PROMPT = """你是一个专门分析文书模板并创建�
       "description": "字段描述",
       "type": "text",
       "required": true,
+      "collection": "required",
+      "priority": 1,
+      "example": "示例输入",
       "placeholder": "输入提示"
     }
   ],
@@ -118,6 +122,11 @@ SKILL_CREATOR_SYSTEM_PROMPT = """你是一个专门分析文书模板并创建�
 - type: "text" - 单行文本
 - type: "textarea" - 多行文本
 - type: "select" - 下拉选择（需要添加 options 数组）
+
+字段收集层级说明：
+- collection: "required" - 必填
+- collection: "optional" - 选填
+- collection: "infer" - 可从材料推断
 
 章节类型说明：
 - type: "required" - 必需章节
@@ -270,5 +279,15 @@ def _fill_defaults(
         field.setdefault("required", True)
         field.setdefault("description", "")
         field.setdefault("placeholder", "")
+        collection = field.get("collection")
+        if not collection:
+            collection = "required" if field.get("required", True) else "optional"
+        if collection not in {"required", "optional", "infer"}:
+            collection = "required" if field.get("required", True) else "optional"
+        if collection == "infer":
+            field["required"] = False
+        field.setdefault("collection", collection)
+        field.setdefault("priority", 3)
+        field.setdefault("example", "")
 
     return config

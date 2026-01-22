@@ -36,6 +36,8 @@ EXTRACTION_SYSTEM_PROMPT = """你是一个专业的文档分析助手。你的�
 注意：
 - extracted_fields 中的键应该匹配用户提供的字段 ID
 - 如果某个字段在文档中找不到相关信息，不要包含该字段
+- extracted_fields 的值必须是纯文本字符串，禁止嵌套 JSON 或对象
+- 如果某个字段包含多条信息，请用换行或分号拼接成字符串
 - external_information 应该包含所有可能有用但不直接对应字段的信息
 - 保持客观准确，不要编造信息
 """
@@ -46,7 +48,8 @@ FIELD_GENERATION_SYSTEM_PROMPT = """你是一个严谨的材料分析助手。�
 要求：
 1. 只能基于材料中明确出现的信息，不要编造或猜测
 2. 如果材料中没有相关信息，value 必须返回 null
-3. 输出必须是严格的 JSON
+3. value 必须是纯文本字符串，禁止嵌套 JSON 或对象
+4. 输出必须是严格的 JSON
 
 输出格式：
 ```json
@@ -79,7 +82,12 @@ async def extract_info_from_file(
     """
     # 构建字段说明
     fields_description = "\n".join([
-        f"- **{f.get('name', f.get('id'))}** (ID: {f.get('id')}): {f.get('description', '无描述')}"
+        (
+            f"- **{f.get('name', f.get('id'))}** "
+            f"(ID: {f.get('id')}, 优先级: P{f.get('priority', 3)}, 收集层级: {f.get('collection', 'optional')}): "
+            f"{f.get('description', '无描述')}"
+            f"{' 示例: ' + f.get('example') if f.get('example') else ''}"
+        )
         for f in skill_fields
     ])
 
@@ -267,6 +275,7 @@ async def generate_field_from_files(
     """
     field_name = field.get("name") or field.get("id")
     field_desc = field.get("description") or "无"
+    field_example = field.get("example") or ""
     field_type = field.get("type") or "text"
 
     files_context = _build_files_context(files, max_chars=20000)
@@ -284,6 +293,7 @@ async def generate_field_from_files(
 - ID：{field.get('id')}
 - 类型：{field_type}
 - 描述：{field_desc}
+{f'- 示例：{field_example}' if field_example else ''}
 
 ## 已收集的信息
 {_format_existing_requirements(existing_requirements)}
