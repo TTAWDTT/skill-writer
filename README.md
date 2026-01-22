@@ -10,6 +10,41 @@
 - **文件提取**：上传材料自动抽取字段并补充外部信息
 - **可扩展**：支持学习新的文书类型并创建新 Skill
 
+## 完整工作流程（端到端）
+
+以下流程描述真实运行顺序和数据在系统中的流转方式：
+
+1. **选择 Skill / 创建 Skill**
+   - Skill 定义结构、需求字段与写作规范，是整个写作的“蓝图”。
+2. **创建会话**
+   - 前端调用 `POST /api/chat/start`，会话进入 `requirement` 阶段。
+3. **需求收集与编辑**
+   - 用户填写必填/选填/可推断字段，系统随时保存到会话 `requirements`。
+4. **上传材料 → 信息抽取 → Skill-Fixer 会话覆盖**
+   - 支持多文件上传，同一批次会合并抽取结果与外部信息摘要。
+   - 抽取结果写入会话需求，并生成 `skill_overlay`（补充规范/准则/章节提示/材料摘要）。
+   - `skill_overlay` **仅作用于当前会话**，不会改动原始 Skill。
+   - 多次上传会重新计算覆盖层：本批次字段 + 会话累计 external_information 共同参与补充。
+5. **开始生成**
+   - 前端调用 `POST /api/chat/session/{session_id}/start-generation`，会话进入 `writing` 阶段。
+6. **逐章节生成（流式）**
+   - 每个章节按顺序执行：`outline → draft → review → revise(可选)`。
+   - Reviewer 可直接给出修订结果，或触发 Writer 进行二次修订。
+7. **组装与完成**
+   - 将各章节合并成最终文档，写入 `documents`，会话进入 `complete`。
+
+简化流程图：
+
+```
+start_session
+  → collect_requirements
+  → upload_files & skill_fixer_overlay
+  → start_generation
+  → [section] outline → draft → review → revise?
+  → assemble
+  → complete
+```
+
 ## 项目结构
 
 ```

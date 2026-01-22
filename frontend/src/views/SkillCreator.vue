@@ -7,15 +7,27 @@
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
         </svg>
       </div>
-      <h1 class="text-3xl font-bold text-dark-300 mb-3">Create Writing Skill</h1>
+      <h1 class="text-3xl font-display font-bold text-dark-300 mb-3">创建写作 Skill</h1>
       <p class="text-dark-50 max-w-xl mx-auto">
-        Upload a template document and we'll automatically generate a writing skill that can help create similar documents.
+        上传模板文档，系统会自动生成可复用的写作技能。
       </p>
     </div>
 
+    <div class="grid sm:grid-cols-4 gap-3">
+      <div
+        v-for="(step, index) in evolutionTrack"
+        :key="step.title"
+        class="rounded-2xl border border-warm-300 bg-warm-100 p-4"
+      >
+        <p class="text-xs uppercase tracking-widest text-dark-50">步骤 {{ index + 1 }}</p>
+        <p class="font-medium text-dark-300 mt-1">{{ step.title }}</p>
+        <p class="text-xs text-dark-50 mt-1">{{ step.description }}</p>
+      </div>
+    </div>
+
     <!-- Upload Section -->
-    <div class="bg-warm-50 rounded-2xl border border-warm-300 p-8">
-      <h2 class="text-lg font-semibold text-dark-300 mb-4">Step 1: Upload Template</h2>
+    <div class="bg-warm-100 rounded-2xl border border-warm-300 p-8">
+      <h2 class="text-lg font-semibold text-dark-300 mb-4">步骤 1：上传模板</h2>
 
       <!-- File Upload Area -->
       <div
@@ -36,8 +48,8 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
-          <p class="text-dark-300 font-medium mb-2">Drag and drop your template file here</p>
-          <p class="text-dark-50 text-sm mb-4">or click to browse</p>
+          <p class="text-dark-300 font-medium mb-2">拖拽模板文件到此处</p>
+          <p class="text-dark-50 text-sm mb-4">或点击选择</p>
           <input
             type="file"
             ref="fileInput"
@@ -49,9 +61,9 @@
             @click="$refs.fileInput.click()"
             class="px-6 py-2.5 bg-anthropic-orange text-white rounded-xl font-medium hover:bg-anthropic-orange-dark transition-colors shadow-sm"
           >
-            Browse Files
+            选择文件
           </button>
-          <p class="text-warm-400 text-xs mt-4">Supported formats: MD, DOC, DOCX, PDF, TXT, PPTX</p>
+          <p class="text-warm-400 text-xs mt-4">支持格式：MD, DOC, DOCX, PDF, TXT, PPTX</p>
         </div>
 
         <!-- Uploaded File Preview -->
@@ -80,52 +92,52 @@
     </div>
 
     <!-- Skill Info Section -->
-    <div v-if="uploadedFile" class="bg-warm-50 rounded-2xl border border-warm-300 p-8">
-      <h2 class="text-lg font-semibold text-dark-300 mb-4">Step 2: Skill Information</h2>
+    <div v-if="uploadedFile" class="bg-warm-100 rounded-2xl border border-warm-300 p-8">
+      <h2 class="text-lg font-semibold text-dark-300 mb-4">步骤 2：Skill 信息</h2>
 
       <div class="space-y-4">
         <div>
-          <label class="block text-sm font-medium text-dark-100 mb-2">Skill Name</label>
+          <label class="block text-sm font-medium text-dark-100 mb-2">Skill 名称</label>
           <input
             v-model="skillInfo.name"
             type="text"
-            placeholder="e.g., Patent Application Writer"
+            placeholder="例如：项目申报书写作"
             class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
           />
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-dark-100 mb-2">Description</label>
+          <label class="block text-sm font-medium text-dark-100 mb-2">描述</label>
           <textarea
             v-model="skillInfo.description"
             rows="3"
-            placeholder="Describe what this skill does..."
+            placeholder="描述该 Skill 的用途..."
             class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none"
           ></textarea>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-dark-100 mb-2">Category</label>
+          <label class="block text-sm font-medium text-dark-100 mb-2">分类</label>
           <select
             v-model="skillInfo.category"
             class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
           >
-            <option value="">Select a category</option>
-            <option value="research">Research & Academic</option>
-            <option value="business">Business & Corporate</option>
-            <option value="legal">Legal & Patents</option>
-            <option value="technical">Technical Writing</option>
-            <option value="creative">Creative Writing</option>
-            <option value="other">Other</option>
+            <option value="">请选择分类</option>
+            <option value="research">科研学术</option>
+            <option value="business">商业/企业</option>
+            <option value="legal">法律/专利</option>
+            <option value="technical">技术写作</option>
+            <option value="creative">创意写作</option>
+            <option value="other">其他</option>
           </select>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-dark-100 mb-2">Tags (comma separated)</label>
+          <label class="block text-sm font-medium text-dark-100 mb-2">标签（逗号分隔）</label>
           <input
             v-model="skillInfo.tags"
             type="text"
-            placeholder="e.g., patent, application, intellectual property"
+            placeholder="例如：项目申请, 资助, 科研"
             class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
           />
         </div>
@@ -143,17 +155,17 @@
         <svg v-else class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
-        {{ isGenerating ? 'Generating Skill...' : 'Generate Writing Skill' }}
+        {{ isGenerating ? '生成中...' : '生成 Skill' }}
       </button>
     </div>
 
     <!-- Generation Progress -->
-    <div v-if="isGenerating" class="bg-warm-50 rounded-2xl border border-warm-300 p-8">
+    <div v-if="isGenerating" class="bg-warm-100 rounded-2xl border border-warm-300 p-8">
       <div class="flex items-center gap-4 mb-4">
         <div class="w-10 h-10 border-3 border-warm-300 border-t-anthropic-orange rounded-full animate-spin"></div>
         <div>
           <p class="font-medium text-dark-300">{{ generationStatus }}</p>
-          <p class="text-sm text-dark-50">This may take a moment...</p>
+          <p class="text-sm text-dark-50">可能需要一些时间...</p>
         </div>
       </div>
       <div class="w-full bg-warm-200 rounded-full h-2">
@@ -165,46 +177,46 @@
     </div>
 
     <!-- Success Message -->
-    <div v-if="generationComplete" class="bg-green-50 rounded-2xl border border-green-200 p-8 text-center">
-      <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
-        <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <div v-if="generationComplete" class="bg-green-900/30 rounded-2xl border border-green-500/40 p-8 text-center">
+      <div class="w-16 h-16 bg-green-900/40 rounded-full flex items-center justify-center mx-auto mb-4">
+        <svg class="w-8 h-8 text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
         </svg>
       </div>
-      <h3 class="text-xl font-semibold text-green-800 mb-2">Skill Created Successfully!</h3>
-      <p class="text-green-600 mb-6">Your new writing skill "{{ skillInfo.name }}" is now available.</p>
+      <h3 class="text-xl font-semibold text-green-200 mb-2">Skill 创建成功！</h3>
+      <p class="text-green-300 mb-6">新建 Skill「{{ skillInfo.name }}」已可使用。</p>
       <div class="flex justify-center gap-4">
         <router-link
           to="/"
-          class="px-6 py-2.5 bg-white text-green-700 border border-green-300 rounded-xl font-medium hover:bg-green-50 transition-colors"
+          class="px-6 py-2.5 bg-warm-100 text-green-300 border border-green-500/40 rounded-xl font-medium hover:bg-warm-200 transition-colors"
         >
-          Back to Skills
+          返回技能列表
         </router-link>
         <button
           @click="resetForm"
           class="px-6 py-2.5 bg-green-500 text-white rounded-xl font-medium hover:bg-green-600 transition-colors"
         >
-          Create Another
+          再建一个
         </button>
       </div>
     </div>
 
     <!-- Error Message -->
-    <div v-if="error" class="bg-red-50 rounded-2xl border border-red-200 p-6">
+    <div v-if="error" class="bg-red-900/30 rounded-2xl border border-red-500/40 p-6">
       <div class="flex items-start gap-4">
-        <div class="w-10 h-10 bg-red-100 rounded-xl flex items-center justify-center flex-shrink-0">
-          <svg class="w-5 h-5 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="w-10 h-10 bg-red-900/40 rounded-xl flex items-center justify-center flex-shrink-0">
+          <svg class="w-5 h-5 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
         <div>
-          <h4 class="font-medium text-red-800">Generation Failed</h4>
-          <p class="text-red-600 text-sm mt-1">{{ error }}</p>
+          <h4 class="font-medium text-red-200">生成失败</h4>
+          <p class="text-red-300 text-sm mt-1">{{ error }}</p>
           <button
             @click="error = null"
-            class="mt-3 text-sm text-red-700 hover:text-red-800 font-medium"
+            class="mt-3 text-sm text-red-300 hover:text-red-200 font-medium"
           >
-            Dismiss
+            关闭
           </button>
         </div>
       </div>
@@ -237,6 +249,25 @@ const toastTitle = ref('')
 const toastMessage = ref('')
 let toastTimer = null
 
+const evolutionTrack = [
+  {
+    title: '模板导入',
+    description: '上传代表性文档或大纲。'
+  },
+  {
+    title: 'Skill 解析',
+    description: '抽取结构、字段与写作规范。'
+  },
+  {
+    title: '发布入库',
+    description: '保存 Skill 以便复用与迭代。'
+  },
+  {
+    title: 'Agent 就绪',
+    description: '开启多智能体写作会话。'
+  }
+]
+
 const skillInfo = ref({
   name: '',
   description: '',
@@ -265,7 +296,7 @@ const processFile = (file) => {
   const ext = '.' + file.name.split('.').pop().toLowerCase()
 
   if (!allowedTypes.includes(ext)) {
-    error.value = `Unsupported file type: ${ext}. Please upload MD, DOC, DOCX, PDF, TXT, or PPTX files.`
+    error.value = `不支持的文件类型：${ext}。请上传 MD、DOC、DOCX、PDF、TXT 或 PPTX。`
     return
   }
 
@@ -333,7 +364,7 @@ const generateSkill = async () => {
     formData.append('tags', skillInfo.value.tags)
 
     // Simulate progress stages
-    generationStatus.value = 'Uploading template file...'
+    generationStatus.value = '正在上传模板...'
     generationProgress.value = 10
 
     // Upload and generate
@@ -347,17 +378,17 @@ const generateSkill = async () => {
       }
     })
 
-    generationStatus.value = 'Analyzing template structure...'
+    generationStatus.value = '正在解析模板结构...'
     generationProgress.value = 50
 
     await new Promise(resolve => setTimeout(resolve, 500))
 
-    generationStatus.value = 'Generating skill configuration...'
+    generationStatus.value = '正在生成 Skill 配置...'
     generationProgress.value = 75
 
     await new Promise(resolve => setTimeout(resolve, 500))
 
-    generationStatus.value = 'Finalizing...'
+    generationStatus.value = '正在完成...'
     generationProgress.value = 100
 
     await new Promise(resolve => setTimeout(resolve, 300))
@@ -372,7 +403,7 @@ const generateSkill = async () => {
       isGenerating.value = false
       return
     }
-    error.value = e.response?.data?.detail || 'Failed to generate skill. Please try again.'
+    error.value = e.response?.data?.detail || 'Skill 生成失败，请重试。'
     isGenerating.value = false
   }
 }

@@ -1,18 +1,18 @@
 <template>
-  <div class="flex h-[calc(100vh-110px)] gap-6">
-    <!-- Left: Requirements Panel -->
-    <div class="w-1/2 flex flex-col gap-4 min-h-0">
+    <div class="flex flex-col lg:flex-row lg:h-full min-h-0 gap-6">
+    <!-- Left: Input Panel -->
+    <div class="w-full lg:w-1/2 flex flex-col gap-4 min-h-0">
       <!-- Top: File Upload Area -->
-      <div class="bg-warm-50 rounded-2xl border border-warm-300 p-5 max-h-[260px] overflow-y-auto">
+      <div class="bg-warm-50 rounded-2xl border border-warm-300 p-5 flex-1 min-h-0 overflow-y-auto">
         <div class="flex items-center gap-3 mb-3">
-          <div class="w-10 h-10 bg-gradient-to-br from-blue-500 to-blue-600 rounded-xl flex items-center justify-center">
+          <div class="w-10 h-10 bg-gradient-to-br from-signal-400 to-signal-600 rounded-xl flex items-center justify-center">
             <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
             </svg>
           </div>
           <div>
-            <h3 class="font-semibold text-dark-300">Upload Materials</h3>
-            <p class="text-xs text-dark-50">Upload files to auto-fill requirements</p>
+            <h3 class="font-display font-semibold text-dark-300">上传材料</h3>
+            <p class="text-xs text-dark-50">材料抽取会增强本次会话的 Skill-Fixer</p>
           </div>
         </div>
 
@@ -29,198 +29,143 @@
 
           <div v-if="isUploading" class="flex flex-col items-center">
             <div class="w-12 h-12 border-3 border-warm-300 border-t-anthropic-orange rounded-full spinner mb-3"></div>
-            <p class="text-dark-100 font-medium">Extracting information...</p>
-            <p class="text-xs text-dark-50 mt-1">Please wait</p>
+            <p class="text-dark-100 font-medium">正在抽取信息...</p>
+            <p class="text-xs text-dark-50 mt-1">请稍候</p>
           </div>
 
           <div v-else>
             <svg class="w-10 h-10 mx-auto text-warm-400 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
-            <p class="text-dark-100 font-medium">Drag & drop files here</p>
-            <p class="text-sm text-dark-50 mt-1">or click to browse</p>
-            <p class="text-xs text-warm-400 mt-3">Supports: .md, .txt, .doc, .docx, .pdf, .pptx</p>
+            <p class="text-dark-100 font-medium">拖拽文件到此处</p>
+            <p class="text-sm text-dark-50 mt-1">或点击选择</p>
+            <p class="text-xs text-warm-400 mt-3">支持：.md, .txt, .doc, .docx, .pdf, .pptx</p>
           </div>
         </div>
 
         <!-- Uploaded Files List -->
         <div v-if="uploadedFiles.length > 0" class="mt-4 space-y-2 max-h-28 overflow-y-auto">
-          <p class="text-xs font-medium text-dark-100 mb-2">Uploaded Files:</p>
-          <div v-for="(file, index) in uploadedFiles" :key="index" class="flex items-center gap-3 p-3 bg-green-50 border border-green-200 rounded-lg">
-            <svg class="w-5 h-5 text-green-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <p class="text-xs font-medium text-dark-100 mb-2">已上传文件：</p>
+          <div v-for="(file, index) in uploadedFiles" :key="index" class="flex items-center gap-3 p-3 bg-green-900/30 border border-green-500/40 rounded-lg">
+            <svg class="w-5 h-5 text-green-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
             <span class="flex-1 text-sm text-dark-300 truncate">{{ file.name }}</span>
-            <span class="text-xs text-green-600">{{ file.extractedCount }} fields extracted</span>
+            <span class="text-xs text-green-300">抽取字段：{{ file.extractedCount }}</span>
           </div>
         </div>
 
         <!-- External Information -->
-        <div v-if="externalInformation" class="mt-4 p-4 bg-blue-50 border border-blue-200 rounded-xl">
+        <div v-if="externalInformation" class="mt-4 p-4 bg-signal-50 border border-signal-200 rounded-xl">
           <div class="flex items-center gap-2 mb-2">
-            <svg class="w-4 h-4 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg class="w-4 h-4 text-signal-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            <span class="text-sm font-medium text-blue-700">Additional Information Extracted</span>
+            <span class="text-sm font-medium text-signal-700">补充信息摘要</span>
           </div>
-          <p class="text-xs text-blue-600 leading-relaxed line-clamp-4">{{ externalInformation }}</p>
+          <p class="text-xs text-signal-700 leading-relaxed line-clamp-4">{{ externalInformation }}</p>
         </div>
 
-        <!-- Skill Fixer Status -->
-        <div v-if="skillOverlay" class="mt-4 p-4 bg-emerald-50 border border-emerald-200 rounded-xl">
-          <div class="flex items-center gap-2 mb-2">
-            <svg class="w-4 h-4 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
-            </svg>
-            <span class="text-sm font-medium text-emerald-700">Skill-fixer 已应用</span>
+        <!-- Skill-Fixer Overlay -->
+        <div v-if="skillOverlay" class="mt-4 p-4 bg-warm-100 border border-warm-300 rounded-xl space-y-3">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <div class="flex items-center gap-2">
+                <svg class="w-4 h-4 text-signal-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <span class="text-sm font-semibold text-dark-300">Skill-Fixer 覆盖</span>
+              </div>
+              <p class="text-xs text-dark-50 mt-1">基于材料的会话级增强，不会修改原 Skill。</p>
+            </div>
+            <span class="text-xs bg-signal-200 text-dark-300 px-2 py-0.5 rounded-full">已启用</span>
           </div>
-          <p class="text-xs text-emerald-700">已基于上传材料补充写作规范与章节提示，仅对本次会话生效。</p>
-          <div v-if="overlayStats" class="mt-2 flex flex-wrap gap-2">
-            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-              补充规范：{{ overlayStats.hasGuidelines ? '有' : '无' }}
+
+          <div v-if="overlayStats" class="flex flex-wrap gap-2">
+            <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+              写作规范：{{ overlayStats.hasGuidelines ? '已补充' : '无' }}
             </span>
-            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-              写作准则：{{ overlayStats.principles }} 条
+            <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+              写作准则：{{ overlayStats.principles }}
             </span>
-            <span class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-              章节补充：{{ overlayStats.sectionCount }} 个
+            <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+              章节补充：{{ overlayStats.sectionCount }}
             </span>
-            <span v-if="overlayStats.hasMaterialContext" class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-              材料摘要：已注入
+            <span v-if="overlayStats.hasMaterialContext" class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+              材料摘要已注入
             </span>
-            <span v-if="overlayStats.relaxRequirements" class="text-xs bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full">
-              必填限制：已解除
+            <span v-if="overlayStats.relaxRequirements" class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+              必填限制已放宽
             </span>
           </div>
+
+          <div v-if="overlayPreview?.guidelines" class="space-y-1">
+            <p class="text-xs uppercase tracking-widest text-dark-50">补充规范</p>
+            <p class="text-xs text-dark-100 line-clamp-3">{{ overlayPreview.guidelines }}</p>
+          </div>
+
+          <div v-if="overlayPreview?.principles.length" class="space-y-1">
+            <p class="text-xs uppercase tracking-widest text-dark-50">写作准则</p>
+            <ul class="text-xs text-dark-100 list-disc pl-4 space-y-1">
+              <li v-for="(item, index) in overlayPreview.principles" :key="`principle-${index}`">{{ item }}</li>
+            </ul>
+          </div>
+
+          <div v-if="overlayPreview?.sections.length" class="space-y-1">
+            <p class="text-xs uppercase tracking-widest text-dark-50">章节补充</p>
+            <div class="flex flex-wrap gap-2">
+              <span
+                v-for="section in overlayPreview.sections"
+                :key="section.id"
+                class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full"
+              >
+                {{ section.title }}
+              </span>
+            </div>
+          </div>
+
+          <div v-if="overlayPreview?.material" class="space-y-1">
+            <p class="text-xs uppercase tracking-widest text-dark-50">材料摘要</p>
+            <p class="text-xs text-dark-100 line-clamp-3">{{ overlayPreview.material }}</p>
+          </div>
+        </div>
+        <div v-else class="mt-4 p-4 bg-warm-100 border border-warm-300 rounded-xl">
+          <p class="text-xs text-dark-50">
+            Skill-Fixer 未激活。上传材料后会生成会话级补充信息。
+          </p>
         </div>
       </div>
 
-      <!-- Bottom: Requirements Form -->
-      <div class="flex-1 bg-warm-50 rounded-2xl border border-warm-300 flex flex-col overflow-hidden min-h-0">
-        <!-- Form Header -->
-        <div class="px-5 py-3 border-b border-warm-300 bg-warm-100 flex items-center justify-between">
-          <div class="flex items-center gap-3">
-            <div class="w-10 h-10 bg-gradient-to-br from-anthropic-orange to-anthropic-orange-dark rounded-xl flex items-center justify-center">
-              <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-            </div>
-            <div>
-              <h3 class="font-semibold text-dark-300">{{ skill?.name || 'Requirements' }}</h3>
-              <p class="text-xs text-dark-50">Complete required fields. Optional and inferred fields improve quality.</p>
-            </div>
+      <!-- Generation Action -->
+      <div class="bg-warm-50 rounded-2xl border border-warm-300 p-5">
+        <div class="flex items-start justify-between gap-3 mb-4">
+          <div>
+            <h3 class="font-display font-semibold text-dark-300">生成文档</h3>
+            <p class="text-xs text-dark-50">系统将基于 Skill 与材料自动完成写作。</p>
           </div>
-          <div class="flex items-center gap-3">
-            <span class="text-sm px-3 py-1.5 rounded-full font-medium" :class="completionBadgeClass">
-              {{ filledFieldsCount }}/{{ totalFieldsCount }} completed
-            </span>
-          </div>
+          <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+            {{ canGenerate ? '可生成' : '等待材料' }}
+          </span>
         </div>
-
-        <!-- Requirements Tables -->
-        <div class="flex-1 overflow-y-auto p-5">
-          <div v-if="totalFieldsCountAll === 0" class="text-center text-sm text-dark-50 py-10">
-            No requirement fields defined for this skill.
-          </div>
-          <div v-else class="space-y-5">
-            <div v-for="group in fieldGroups" :key="group.key">
-              <div class="flex items-center justify-between mb-2">
-                <div>
-                  <p class="text-sm font-semibold text-dark-300">{{ group.label }}</p>
-                  <p class="text-xs text-dark-50">{{ group.description }}</p>
-                </div>
-                <span class="text-xs font-medium px-2.5 py-1 rounded-full" :class="group.badgeClass">
-                  {{ group.fields.length }}
-                </span>
-              </div>
-              <div v-if="group.fields.length === 0" class="text-xs text-warm-400 py-4 text-center border border-dashed border-warm-300 rounded-xl">
-                No fields in this group.
-              </div>
-              <div v-else class="overflow-hidden rounded-xl border border-warm-300 bg-white">
-                <table class="w-full text-sm">
-                  <thead class="bg-warm-100 text-dark-50">
-                    <tr>
-                      <th class="text-left px-4 py-3 font-medium">{{ group.tableLabel }}</th>
-                      <th class="text-left px-4 py-3 font-medium w-2/3">Value</th>
-                    </tr>
-                  </thead>
-                  <tbody class="divide-y divide-warm-200">
-                    <tr v-for="field in group.fields" :key="field.id" class="align-top">
-                      <td class="px-4 py-3">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <div class="font-medium text-dark-300">{{ field.name }}</div>
-                          <span class="text-[10px] font-semibold uppercase px-2 py-0.5 rounded-full" :class="priorityBadgeClass(field)">
-                            {{ priorityLabel(field) }}
-                          </span>
-                          <span v-if="field.collection === 'infer'" class="text-[10px] px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
-                            Inferred
-                          </span>
-                        </div>
-                        <p v-if="field.description" class="text-xs text-dark-50 mt-1">{{ field.description }}</p>
-                        <p v-if="field.example" class="text-xs text-warm-400 mt-2">Example: {{ field.example }}</p>
-                        <span v-if="extractedFields[field.id]" class="mt-2 inline-flex items-center gap-1 text-xs text-green-600 bg-green-50 px-2 py-0.5 rounded-full">
-                          <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd" />
-                          </svg>
-                          Auto-filled
-                        </span>
-                      </td>
-                      <td class="px-4 py-3">
-                        <div class="flex gap-3" :class="isTextareaField(field) ? 'items-start' : 'items-center'">
-                          <textarea
-                            v-if="isTextareaField(field)"
-                            v-model="formData[field.id]"
-                            :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                            rows="4"
-                            class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent resize-none transition-all"
-                          ></textarea>
-                          <input
-                            v-else
-                            v-model="formData[field.id]"
-                            :type="field.type === 'number' ? 'number' : 'text'"
-                            :placeholder="field.placeholder || 'Enter ' + field.name.toLowerCase() + '...'"
-                            class="flex-1 px-4 py-3 bg-white border border-warm-300 rounded-xl text-sm text-dark-300 placeholder-warm-400 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent transition-all"
-                          />
-                          <button
-                            type="button"
-                            @click="generateField(field)"
-                            :disabled="!canAutoGenerate || isGeneratingField(field.id)"
-                            class="shrink-0 px-3 py-2 text-xs font-medium rounded-lg border border-warm-300 bg-warm-100 text-dark-100 hover:bg-warm-200 disabled:bg-warm-200 disabled:text-warm-500 disabled:cursor-not-allowed transition-all"
-                          >
-                            {{ isGeneratingField(field.id) ? '生成中...' : 'AI生成' }}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Generate Button -->
-        <div class="p-4 border-t border-warm-300 bg-warm-100">
-          <button
-            @click="startGeneration"
-            :disabled="!canGenerate || isWriting"
-            class="w-full py-3 bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark text-white rounded-xl font-semibold text-base hover:shadow-lg disabled:from-warm-300 disabled:to-warm-400 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-3"
-          >
-            <svg v-if="!isWriting" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
-            </svg>
-            <div v-else class="w-6 h-6 border-3 border-white/30 border-t-white rounded-full spinner"></div>
-            {{ isWriting ? 'Generating Document...' : 'Generate Document' }}
-          </button>
-          <p v-if="!canGenerate && !isWriting" class="text-xs text-warm-400 text-center mt-2">
-            Please fill all required fields to continue
-          </p>
-        </div>
+        <button
+          @click="startGeneration"
+          :disabled="!canGenerate || isWriting"
+          class="w-full py-3 bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark text-white rounded-xl font-semibold text-base hover:shadow-lg disabled:from-warm-300 disabled:to-warm-400 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-200 flex items-center justify-center gap-3"
+        >
+          <svg v-if="!isWriting" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
+          </svg>
+          <div v-else class="w-6 h-6 border-3 border-white/30 border-t-white rounded-full spinner"></div>
+          {{ isWriting ? '文档生成中...' : '生成文档' }}
+        </button>
+        <p v-if="!canGenerate && !isWriting" class="text-xs text-warm-400 text-center mt-2">
+          请先上传材料以启用会话级补充，再开始生成。
+        </p>
       </div>
     </div>
 
     <!-- Right: Document Preview -->
-    <div class="w-1/2 flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden min-h-0">
+    <div class="w-full lg:w-1/2 flex flex-col bg-warm-50 rounded-2xl border border-warm-300 overflow-hidden min-h-0">
       <!-- Preview Header -->
       <div class="px-6 py-4 border-b border-warm-300 bg-warm-100 flex items-center justify-between">
         <div class="flex items-center gap-3">
@@ -229,7 +174,7 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
-          <h3 class="font-semibold text-dark-300">Document Preview</h3>
+          <h3 class="font-display font-semibold text-dark-300">文档预览</h3>
         </div>
         <Transition name="fade">
           <div v-if="documentContent" class="flex gap-2">
@@ -238,21 +183,21 @@
             </button>
             <div class="relative" ref="exportDropdown">
               <button @click="showExportMenu = !showExportMenu" class="px-4 py-2 text-sm bg-anthropic-orange text-white rounded-xl hover:bg-anthropic-orange-dark transition-all font-medium flex items-center gap-2">
-                Export
+                导出
                 <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showExportMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
                 </svg>
               </button>
               <Transition name="dropdown">
-                <div v-if="showExportMenu" class="absolute right-0 mt-2 w-40 bg-white rounded-xl shadow-lg border border-warm-300 py-2 z-10">
+                <div v-if="showExportMenu" class="absolute right-0 mt-2 w-40 bg-warm-100 rounded-xl shadow-lg border border-warm-300 py-2 z-10">
                   <button @click="exportAs('md')" class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-3">
-                    <span class="font-mono text-xs bg-warm-200 rounded px-1.5 py-0.5">MD</span> Markdown
+                    <span class="font-mono text-xs bg-warm-200 rounded px-1.5 py-0.5">MD</span> Markdown 格式
                   </button>
                   <button @click="exportAs('docx')" class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-3">
-                    <span class="font-mono text-xs bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">W</span> Word
+                    <span class="font-mono text-xs bg-signal-100 text-signal-700 rounded px-1.5 py-0.5">W</span> Word 文档
                   </button>
                   <button @click="exportAs('pdf')" class="w-full px-4 py-2 text-left text-sm text-dark-300 hover:bg-warm-100 flex items-center gap-3">
-                    <span class="font-mono text-xs bg-red-100 text-red-700 rounded px-1.5 py-0.5">PDF</span> PDF
+                    <span class="font-mono text-xs bg-red-900/30 text-red-300 rounded px-1.5 py-0.5">PDF</span> PDF 文档
                   </button>
                 </div>
               </Transition>
@@ -266,11 +211,11 @@
         <div v-if="isWriting" class="px-6 py-4 bg-anthropic-orange/5 border-b border-anthropic-orange/20">
           <div class="flex items-center gap-3 mb-3">
             <div class="w-5 h-5 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner"></div>
-            <span class="font-medium text-dark-300">Generating document...</span>
+            <span class="font-medium text-dark-300">正在生成文档...</span>
           </div>
           <div v-if="writingProgress.total > 0">
             <div class="flex justify-between mb-2 text-sm text-dark-50">
-              <span>{{ currentSection || 'Processing...' }}</span>
+              <span>{{ currentSection || '处理中...' }}</span>
               <span>{{ writingProgress.current }} / {{ writingProgress.total }}</span>
             </div>
             <div class="w-full bg-warm-200 rounded-full h-2 overflow-hidden">
@@ -287,10 +232,10 @@
               </span>
             </div>
             <p v-if="currentStageLabel" class="mt-2 text-xs text-dark-50">
-              Now: {{ currentStageLabel }}
+              当前阶段：{{ currentStageLabel }}
             </p>
-            <p v-if="reviewSnapshot" class="mt-1 text-xs" :class="reviewSnapshot.passed ? 'text-green-700' : 'text-amber-700'">
-              Review score: {{ reviewSnapshot.score ?? '-' }} · {{ reviewSnapshot.passed ? 'Pass' : 'Needs revision' }}
+            <p v-if="reviewSnapshot" class="mt-1 text-xs" :class="reviewSnapshot.passed ? 'text-green-300' : 'text-amber-300'">
+              评审分数：{{ reviewSnapshot.score ?? '-' }} · {{ reviewSnapshot.passed ? '通过' : '需要修订' }}
             </p>
           </div>
         </div>
@@ -307,8 +252,8 @@
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                 </svg>
               </div>
-              <p class="text-dark-100 font-semibold text-lg">Document Preview</p>
-              <p class="text-sm text-warm-400 mt-2">Fill in the requirements and click<br>"Generate Document" to preview</p>
+              <p class="text-dark-100 font-semibold text-lg">文档预览</p>
+              <p class="text-sm text-warm-400 mt-2">上传材料后点击“生成文档”进行预览</p>
             </div>
           </div>
         </Transition>
@@ -338,17 +283,16 @@ const skillId = computed(() => route.params.skillId)
 const skill = ref(null)
 const sessionId = ref(null)
 const isWriting = ref(false)
-const isComplete = ref(false)
 const documentContent = ref('')
 const currentSection = ref('')
 const writingProgress = ref({ current: 0, total: 0 })
 const currentStage = ref('')
 const stageOrder = ['outline', 'draft', 'review', 'revise']
 const stageLabels = {
-  outline: 'Outline',
-  draft: 'Draft',
-  review: 'Review',
-  revise: 'Revise'
+  outline: '提纲生成',
+  draft: '内容写作',
+  review: '质量评审',
+  revise: '修订完善'
 }
 const stageState = reactive({
   outline: 'pending',
@@ -359,13 +303,12 @@ const stageState = reactive({
 const reviewSnapshot = ref(null)
 const showExportMenu = ref(false)
 const exportDropdown = ref(null)
-const copyButtonText = ref('Copy')
+const copyButtonText = ref('复制')
 const savedDocumentId = ref(null)
 
-// Requirements form state
+// Requirements state
 const requirementFields = ref([])
 const formData = reactive({})
-const extractedFields = ref({})
 const externalInformation = ref('')
 const skillOverlay = ref(null)
 
@@ -374,7 +317,6 @@ const fileInputRef = ref(null)
 const isUploading = ref(false)
 const isDragging = ref(false)
 const uploadedFiles = ref([])
-const generatingFields = reactive({})
 
 // Store EventSource reference for cleanup
 const eventSourceRef = shallowRef(null)
@@ -397,101 +339,17 @@ watch(documentContent, (newContent) => {
   updateRenderedDocument(newContent)
 }, { immediate: true })
 
-const getFieldCollection = (field) => {
-  return field.collection || (field.required ? 'required' : 'optional')
-}
-
-const getFieldPriority = (field) => {
-  const value = Number(field.priority)
-  return [1, 2, 3].includes(value) ? value : 3
-}
-
-const priorityLabel = (field) => {
-  return `P${getFieldPriority(field)}`
-}
-
-const priorityBadgeClass = (field) => {
-  const priority = getFieldPriority(field)
-  if (priority === 1) return 'bg-red-100 text-red-700'
-  if (priority === 2) return 'bg-yellow-100 text-yellow-700'
-  return 'bg-warm-200 text-dark-50'
-}
-
-const sortFields = (fields) => {
-  return [...fields].sort((a, b) => {
-    const priorityDiff = getFieldPriority(a) - getFieldPriority(b)
-    if (priorityDiff !== 0) return priorityDiff
-    return (a.name || '').localeCompare(b.name || '')
-  })
-}
-
 // Computed
 const requiredFields = computed(() => (
-  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'required'))
+  requirementFields.value.filter(field => field.collection === 'required' || field.required)
 ))
-
-const optionalFields = computed(() => (
-  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'optional'))
-))
-
-const inferFields = computed(() => (
-  sortFields(requirementFields.value.filter(field => getFieldCollection(field) === 'infer'))
-))
-
-const fieldGroups = computed(() => ([
-  {
-    key: 'required',
-    label: 'Required Fields',
-    tableLabel: 'Required Field',
-    description: 'Must be completed before generation.',
-    badgeClass: 'bg-red-100 text-red-700',
-    fields: requiredFields.value
-  },
-  {
-    key: 'optional',
-    label: 'Optional Fields',
-    tableLabel: 'Optional Field',
-    description: 'Optional but improves quality.',
-    badgeClass: 'bg-warm-200 text-dark-50',
-    fields: optionalFields.value
-  },
-  {
-    key: 'infer',
-    label: 'Infer From Materials',
-    tableLabel: 'Inferred Field',
-    description: 'Prefer extracted from uploaded materials.',
-    badgeClass: 'bg-blue-100 text-blue-700',
-    fields: inferFields.value
-  }
-]))
-
-const filledFieldsCount = computed(() => {
-  return requiredFields.value.filter(f => {
-    const val = formData[f.id]
-    return val && val.toString().trim()
-  }).length
-})
-
-const totalFieldsCount = computed(() => requiredFields.value.length)
-
-const totalFieldsCountAll = computed(() => requirementFields.value.length)
-
-const completionBadgeClass = computed(() => {
-  const ratio = totalFieldsCount.value > 0 ? filledFieldsCount.value / totalFieldsCount.value : 0
-  if (ratio >= 1) return 'bg-green-100 text-green-700'
-  if (ratio >= 0.5) return 'bg-yellow-100 text-yellow-700'
-  return 'bg-warm-200 text-dark-100'
-})
 
 const canGenerate = computed(() => {
+  if (!sessionId.value) return false
   return requiredFields.value.every(f => {
     const val = formData[f.id]
     return val && val.toString().trim()
   })
-})
-
-const canAutoGenerate = computed(() => {
-  return !!sessionId.value && uploadedFiles.value.length > 0
 })
 
 const progressPercent = computed(() => {
@@ -506,7 +364,7 @@ const overlayStats = computed(() => {
   const guidelineText = (skillOverlay.value.writing_guidelines_additions || '').trim()
   const principles = Array.isArray(skillOverlay.value.global_principles)
     ? skillOverlay.value.global_principles.filter(item => item && item.toString().trim()).length
-    : 0
+  : 0
   const sectionOverrides = skillOverlay.value.section_overrides || {}
   const sectionCount = typeof sectionOverrides === 'object'
     ? Object.keys(sectionOverrides).filter(key => sectionOverrides[key] && sectionOverrides[key].toString().trim()).length
@@ -521,9 +379,47 @@ const overlayStats = computed(() => {
   }
 })
 
-const isTextareaField = (field) => {
-  return field.type === 'textarea' || (field.description && field.description.length > 50)
-}
+const sectionTitleMap = computed(() => {
+  const map = {}
+  const walk = (sections = []) => {
+    sections.forEach((section) => {
+      if (!section) return
+      if (section.id) {
+        map[section.id] = section.title || section.id
+      }
+      if (Array.isArray(section.children) && section.children.length > 0) {
+        walk(section.children)
+      }
+    })
+  }
+  walk(skill.value?.structure || [])
+  return map
+})
+
+const overlayPreview = computed(() => {
+  if (!skillOverlay.value) return null
+  const guidelines = (skillOverlay.value.writing_guidelines_additions || '').trim()
+  const principles = Array.isArray(skillOverlay.value.global_principles)
+    ? skillOverlay.value.global_principles.filter(item => item && item.toString().trim())
+    : []
+  const sectionOverrides = skillOverlay.value.section_overrides || {}
+  const sections = typeof sectionOverrides === 'object'
+    ? Object.entries(sectionOverrides)
+      .filter(([, value]) => value && value.toString().trim())
+      .map(([id]) => ({
+        id,
+        title: sectionTitleMap.value[id] || id
+      }))
+    : []
+  const material = (skillOverlay.value.material_context || '').trim()
+  return {
+    guidelines,
+    principles,
+    sections,
+    material
+  }
+})
+
 
 const resetStageState = () => {
   stageOrder.forEach((stage) => {
@@ -535,7 +431,7 @@ const resetStageState = () => {
 
 const stageBadgeClass = (status) => {
   if (status === 'active') return 'bg-anthropic-orange/10 border-anthropic-orange text-anthropic-orange-dark'
-  if (status === 'done') return 'bg-green-50 border-green-200 text-green-700'
+  if (status === 'done') return 'bg-green-900/30 border-green-500/40 text-green-300'
   if (status === 'skipped') return 'bg-warm-100 border-warm-200 text-warm-400'
   return 'bg-warm-50 border-warm-200 text-warm-400'
 }
@@ -570,7 +466,7 @@ const getDocumentTitle = () => {
   const matched = candidates.find((value) => value && value.toString().trim())
   if (matched) return matched.toString().trim()
 
-  const base = skill.value?.name || 'Document'
+  const base = skill.value?.name || '文档'
   const stamp = new Date().toISOString().slice(0, 10)
   return `${base} ${stamp}`
 }
@@ -641,7 +537,7 @@ const startSession = async () => {
   } catch (e) {
     if (notifyModelNotConfigured(e)) return
     console.error('Failed to start session:', e)
-    alert(e.response?.data?.detail || 'Failed to start session.')
+    alert(e.response?.data?.detail || '启动会话失败。')
   }
 }
 
@@ -700,33 +596,6 @@ watch(formData, () => {
   saveRequirementsDebounced()
 }, { deep: true })
 
-const isGeneratingField = (fieldId) => {
-  return !!generatingFields[fieldId]
-}
-
-const generateField = async (field) => {
-  if (!sessionId.value || !canAutoGenerate.value || isGeneratingField(field.id)) return
-
-  generatingFields[field.id] = true
-  try {
-    const response = await api.post(`/chat/session/${sessionId.value}/generate-field`, {
-      field_id: field.id
-    })
-
-    if (response.data.success) {
-      formData[field.id] = response.data.value ?? ''
-    } else {
-      alert(response.data.message || 'AI 生成失败')
-    }
-  } catch (e) {
-    console.error('AI generate failed:', e)
-    if (notifyModelNotConfigured(e)) return
-    alert(e.response?.data?.detail || 'AI 生成失败')
-  } finally {
-    generatingFields[field.id] = false
-  }
-}
-
 const startGeneration = async () => {
   if (!canGenerate.value || isWriting.value) return
 
@@ -747,7 +616,7 @@ const startGeneration = async () => {
   } catch (e) {
     console.error('Failed to start generation:', e)
     if (notifyModelNotConfigured(e)) return
-    alert(e.response?.data?.detail || 'Failed to start generation. Please try again.')
+    alert(e.response?.data?.detail || '启动生成失败，请重试。')
   }
 }
 
@@ -801,7 +670,6 @@ const startStreamGeneration = async () => {
 
         case 'complete':
           isWriting.value = false
-          isComplete.value = true
           currentSection.value = ''
           resetStageState()
           documentContent.value = data.document
@@ -813,7 +681,7 @@ const startStreamGeneration = async () => {
           isWriting.value = false
           resetStageState()
           closeEventSource()
-          alert(`Generation failed: ${data.error}`)
+          alert(`生成失败：${data.error}`)
           break
       }
     }
@@ -897,7 +765,6 @@ const uploadFiles = async (files) => {
         if (value && value.toString().trim()) {
           const field = requirementFields.value.find((item) => item.id === key)
           formData[key] = normalizeFieldValue(value, field || { id: key, type: 'text' })
-          extractedFields.value[key] = value
           extractedCount++
         }
       })
@@ -909,13 +776,13 @@ const uploadFiles = async (files) => {
       await fetchSessionFiles()
       await fetchRequirements()
     } else {
-      alert(result.message || 'File processing failed')
+      alert(result.message || '文件处理失败')
     }
 
   } catch (e) {
     console.error('File upload failed:', e)
     if (notifyModelNotConfigured(e)) return
-    alert(e.response?.data?.detail || 'File upload failed')
+    alert(e.response?.data?.detail || '文件上传失败')
   } finally {
     isUploading.value = false
   }
@@ -943,9 +810,9 @@ const readFileAsBase64 = (file) => {
 const copyDocument = async () => {
   if (documentContent.value) {
     await navigator.clipboard.writeText(documentContent.value)
-    copyButtonText.value = 'Copied!'
+    copyButtonText.value = '已复制'
     setTimeout(() => {
-      copyButtonText.value = 'Copy'
+      copyButtonText.value = '复制'
     }, 2000)
   }
 }
@@ -954,7 +821,7 @@ const exportAs = async (format) => {
   showExportMenu.value = false
   if (!documentContent.value) return
 
-  const filename = skill.value?.name || 'document'
+  const filename = skill.value?.name || '文档'
 
   if (format === 'md') {
     const blob = new Blob([documentContent.value], { type: 'text/markdown;charset=utf-8' })
@@ -974,7 +841,7 @@ const exportAs = async (format) => {
       downloadBlob(blob, `${filename}.${format}`)
     } catch (e) {
       console.error('Export failed:', e)
-      alert(`Export to ${format.toUpperCase()} failed.`)
+      alert(`导出 ${format.toUpperCase()} 失败。`)
     }
   }
 }
@@ -1127,46 +994,46 @@ onUnmounted(() => {
 }
 
 .prose-warm {
-  --tw-prose-body: #252523;
-  --tw-prose-headings: #191918;
-  --tw-prose-links: #D97757;
-  --tw-prose-bold: #191918;
-  --tw-prose-counters: #2D2D2B;
-  --tw-prose-bullets: #D1CBC0;
-  --tw-prose-hr: #E8E4DD;
-  --tw-prose-quotes: #252523;
-  --tw-prose-quote-borders: #D97757;
-  --tw-prose-code: #191918;
-  --tw-prose-pre-code: #F5F3EF;
-  --tw-prose-pre-bg: #252523;
+  --tw-prose-body: #D5DDE9;
+  --tw-prose-headings: #F8FAFC;
+  --tw-prose-links: #E36A3A;
+  --tw-prose-bold: #F8FAFC;
+  --tw-prose-counters: #B7C3D6;
+  --tw-prose-bullets: #2F3C55;
+  --tw-prose-hr: #243044;
+  --tw-prose-quotes: #D5DDE9;
+  --tw-prose-quote-borders: #E36A3A;
+  --tw-prose-code: #F8FAFC;
+  --tw-prose-pre-code: #E6ECF4;
+  --tw-prose-pre-bg: #0B0F14;
 }
 
 .markdown-content :deep(h1),
 .markdown-content :deep(h2),
 .markdown-content :deep(h3) {
-  color: #191918;
+  color: #F8FAFC;
   font-weight: 600;
 }
 
-.markdown-content :deep(a) { color: #D97757; }
-.markdown-content :deep(a:hover) { color: #C25E3D; }
+.markdown-content :deep(a) { color: #E36A3A; }
+.markdown-content :deep(a:hover) { color: #F0A384; }
 
 .markdown-content :deep(code) {
-  background-color: #F5F3EF;
+  background-color: #1B2230;
   padding: 0.125rem 0.375rem;
   border-radius: 0.375rem;
   font-size: 0.875em;
 }
 
 .markdown-content :deep(pre) {
-  background-color: #252523;
+  background-color: #0B0F14;
   border-radius: 0.75rem;
   padding: 1rem;
 }
 
 .markdown-content :deep(blockquote) {
-  border-left-color: #D97757;
-  background-color: #FAF9F6;
+  border-left-color: #E36A3A;
+  background-color: #141A21;
   padding: 1rem;
   border-radius: 0 0.5rem 0.5rem 0;
 }

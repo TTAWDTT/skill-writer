@@ -1,27 +1,109 @@
 <template>
-  <div class="space-y-12">
-    <!-- Hero Section -->
-    <div class="text-center py-16">
-      <h1 class="text-4xl md:text-5xl font-bold text-dark-300 mb-6 tracking-tight">
-        Intelligent Document Writer
-      </h1>
-      <p class="text-lg text-dark-50 max-w-2xl mx-auto leading-relaxed">
-        Select a writing skill, engage in conversation, and let AI help you create professional documents with precision and expertise.
+  <div class="space-y-10">
+    <!-- Header -->
+    <section class="space-y-4">
+      <div class="text-xs uppercase tracking-[0.2em] text-dark-50">多智能体写作系统</div>
+      <h1 class="text-3xl md:text-4xl font-display font-semibold text-dark-300">SkillWriter</h1>
+      <p class="text-sm md:text-base text-dark-50 max-w-2xl">
+        Skill 定义结构与需求，Agent 负责信息收集、分段撰写、质量审查与必要修订。
       </p>
-    </div>
+      <div class="flex flex-wrap gap-3">
+        <router-link
+          to="/create-skill"
+          class="px-5 py-2.5 bg-anthropic-orange text-white rounded-xl font-medium hover:bg-anthropic-orange-dark transition-colors"
+        >
+          新建 Skill
+        </router-link>
+        <router-link
+          to="/documents"
+          class="px-5 py-2.5 bg-warm-100 text-dark-100 rounded-xl font-medium hover:bg-warm-200 transition-colors border border-warm-300"
+        >
+          查看文档
+        </router-link>
+      </div>
+    </section>
+
+    <!-- Architecture -->
+    <section class="grid gap-4 lg:grid-cols-2">
+      <div class="rounded-2xl border border-warm-300 bg-warm-100 p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-dark-300">架构概览</h2>
+          <span class="text-xs bg-warm-200 text-dark-50 px-2 py-0.5 rounded-full">工作流</span>
+        </div>
+        <ul class="text-sm text-dark-50 space-y-2">
+          <li>Skill 定义文档结构、需求字段与评审标准。</li>
+          <li>会话先收集需求，再进入写作与审查循环。</li>
+          <li>文档与 Skill 元数据一起保存，便于复用。</li>
+        </ul>
+        <div class="grid grid-cols-3 gap-3 text-xs">
+          <div class="rounded-xl border border-warm-300 bg-warm-50 p-3">
+            <p class="text-dark-50">可用技能</p>
+            <p class="text-base font-semibold text-dark-300 mt-1">{{ loading ? '--' : skills.length }}</p>
+          </div>
+          <div class="rounded-xl border border-warm-300 bg-warm-50 p-3">
+            <p class="text-dark-50">Agent 阶段</p>
+            <p class="text-base font-semibold text-dark-300 mt-1">{{ agentStages.length }}</p>
+          </div>
+          <div class="rounded-xl border border-warm-300 bg-warm-50 p-3">
+            <p class="text-dark-50">会话覆盖</p>
+            <p class="text-base font-semibold text-dark-300 mt-1">会话级</p>
+          </div>
+        </div>
+        <div class="flex flex-wrap gap-2 text-xs text-dark-50">
+          <span
+            v-for="stage in agentStages"
+            :key="stage.id"
+            class="px-2 py-1 rounded-full border border-warm-300 bg-warm-50"
+          >
+            {{ stage.label }}
+          </span>
+        </div>
+      </div>
+
+      <div class="rounded-2xl border border-warm-300 bg-warm-100 p-5 space-y-4">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-semibold text-dark-300">Skill-Fixer 覆盖</h2>
+          <span class="text-xs bg-signal-200 text-dark-300 px-2 py-0.5 rounded-full">仅本会话</span>
+        </div>
+        <p class="text-sm text-dark-50">
+          会话内上传的材料可生成补充规范、写作准则与章节提示，不改变原始 Skill。
+        </p>
+        <div class="space-y-2">
+          <div
+            v-for="item in overlayHighlights"
+            :key="item.title"
+            class="rounded-xl border border-warm-300 bg-warm-50 p-3"
+          >
+            <div class="flex items-center justify-between">
+              <p class="text-sm font-medium text-dark-300">{{ item.title }}</p>
+              <span class="text-xs font-medium px-2 py-0.5 rounded-full" :class="item.tagClass">{{ item.tag }}</span>
+            </div>
+            <p class="text-xs text-dark-50 mt-2">{{ item.description }}</p>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Skills Grid -->
     <div class="space-y-6">
-      <h2 class="text-sm font-semibold text-dark-50 uppercase tracking-wider">
-        Available Skills
-      </h2>
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-dark-50 uppercase tracking-wider">
+          技能列表
+        </h2>
+        <router-link
+          to="/create-skill"
+          class="text-sm font-medium text-dark-100 hover:text-anthropic-orange transition-colors"
+        >
+          新建 Skill ->
+        </router-link>
+      </div>
 
       <!-- Loading Skeleton -->
       <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div
           v-for="i in 4"
           :key="`skeleton-${i}`"
-          class="bg-warm-50 rounded-2xl border border-warm-300 p-6 animate-pulse"
+          class="bg-warm-100 rounded-2xl border border-warm-300 p-6 animate-pulse"
         >
           <div class="flex items-start justify-between mb-4">
             <div class="w-12 h-12 bg-warm-200 rounded-xl"></div>
@@ -49,7 +131,7 @@
         <div
           v-for="skill in skills"
           :key="skill.id"
-          class="group bg-warm-50 rounded-2xl border border-warm-300 p-6 hover:border-anthropic-orange hover:shadow-lg transition-all duration-300 gpu-accelerate"
+          class="group bg-warm-100 rounded-2xl border border-warm-300 p-6 hover:border-anthropic-orange hover:shadow-lg transition-all duration-300 gpu-accelerate"
         >
           <div class="flex items-start justify-between mb-4">
             <div class="w-12 h-12 bg-gradient-to-br from-anthropic-orange to-anthropic-orange-dark rounded-xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform duration-300">
@@ -58,11 +140,11 @@
               </svg>
             </div>
             <span class="text-xs font-medium bg-warm-200 text-dark-50 px-3 py-1 rounded-full">
-              {{ skill.category || 'Document' }}
+              {{ skill.category || '文档' }}
             </span>
           </div>
 
-          <h3 class="text-xl font-semibold text-dark-300 mb-2 group-hover:text-anthropic-orange transition-colors duration-200">
+          <h3 class="text-xl font-display font-semibold text-dark-300 mb-2 group-hover:text-anthropic-orange transition-colors duration-200">
             {{ skill.name }}
           </h3>
           <p class="text-dark-50 text-sm mb-4 line-clamp-2">
@@ -89,7 +171,7 @@
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
               </svg>
-              View Details
+              查看详情
             </button>
             <button
               @click="selectSkill(skill)"
@@ -98,12 +180,12 @@
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
               </svg>
-              Start Writing
+              开始写作
             </button>
             <button
               @click.stop="confirmDeleteSkill(skill)"
-              class="p-2.5 bg-warm-100 text-dark-100 rounded-xl hover:bg-red-100 hover:text-red-600 transition-all duration-200 active:scale-95"
-              title="Delete Skill"
+              class="p-2.5 bg-warm-100 text-dark-100 rounded-xl hover:bg-red-900/30 hover:text-red-300 transition-all duration-200 active:scale-95"
+              title="删除 Skill"
             >
               <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -115,7 +197,7 @@
         <!-- Create New Skill Card -->
         <div
           key="create-new"
-          class="group bg-warm-50/50 rounded-2xl border-2 border-dashed border-warm-300 p-6 flex flex-col items-center justify-center min-h-[220px] hover:border-anthropic-orange-light hover:bg-warm-50 transition-all duration-300 cursor-pointer gpu-accelerate"
+          class="group bg-warm-100 rounded-2xl border-2 border-dashed border-warm-300 p-6 flex flex-col items-center justify-center min-h-[220px] hover:border-anthropic-orange-light hover:bg-warm-200 transition-all duration-300 cursor-pointer gpu-accelerate"
           @click="createNewSkill"
         >
           <div class="w-12 h-12 bg-warm-200 rounded-xl flex items-center justify-center mb-4 group-hover:bg-anthropic-orange-light group-hover:scale-110 transition-all duration-300">
@@ -123,8 +205,8 @@
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
             </svg>
           </div>
-          <span class="text-dark-100 font-medium mb-1">Create New Skill</span>
-          <span class="text-sm text-warm-400">Add a custom document template</span>
+          <span class="text-dark-100 font-medium mb-1">新建 Skill</span>
+          <span class="text-sm text-warm-400">从模板生成新的技能</span>
         </div>
       </TransitionGroup>
     </div>
@@ -132,18 +214,18 @@
     <!-- Error State -->
     <Transition name="fade">
       <div v-if="error" class="flex flex-col items-center justify-center py-20">
-        <div class="w-16 h-16 bg-red-50 rounded-full flex items-center justify-center mb-4">
-          <svg class="w-8 h-8 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <div class="w-16 h-16 bg-red-900/40 rounded-full flex items-center justify-center mb-4">
+          <svg class="w-8 h-8 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           </svg>
         </div>
-        <p class="text-dark-100 font-medium mb-2">Unable to load skills</p>
+        <p class="text-dark-100 font-medium mb-2">技能加载失败</p>
         <p class="text-dark-50 text-sm mb-4">{{ error }}</p>
         <button
           @click="fetchSkills"
           class="px-6 py-2.5 bg-anthropic-orange text-white rounded-xl font-medium hover:bg-anthropic-orange-dark transition-all duration-200 shadow-sm hover:shadow-md active:scale-95"
         >
-          Try Again
+          重新加载
         </button>
       </div>
     </Transition>
@@ -156,8 +238,8 @@
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
           </svg>
         </div>
-        <p class="text-dark-100 font-medium mb-2">No skills available</p>
-        <p class="text-dark-50 text-sm">Create your first writing skill to get started</p>
+        <p class="text-dark-100 font-medium mb-2">暂无技能</p>
+        <p class="text-dark-50 text-sm">先创建一个写作技能开始使用</p>
       </div>
     </Transition>
 
@@ -169,21 +251,21 @@
           class="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
           @click.self="cancelDelete"
         >
-          <div class="bg-white rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl modal-content">
+          <div class="bg-warm-50 rounded-2xl p-6 max-w-md w-full mx-4 shadow-xl modal-content border border-warm-300">
             <div class="flex items-center gap-4 mb-4">
-              <div class="w-12 h-12 bg-red-100 rounded-full flex items-center justify-center flex-shrink-0">
-                <svg class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div class="w-12 h-12 bg-red-900/40 rounded-full flex items-center justify-center flex-shrink-0">
+                <svg class="w-6 h-6 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
                 </svg>
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-dark-300">Delete Skill</h3>
-                <p class="text-sm text-dark-50">This action cannot be undone</p>
+                <h3 class="text-lg font-semibold text-dark-300">删除 Skill</h3>
+                <p class="text-sm text-dark-50">此操作不可撤销</p>
               </div>
             </div>
             <p class="text-dark-100 mb-6">
-              Are you sure you want to delete "<span class="font-medium">{{ skillToDelete?.name }}</span>"?
-              All associated files will be permanently removed.
+              确认删除「<span class="font-medium">{{ skillToDelete?.name }}</span>」？
+              相关文件将被永久移除。
             </p>
             <div class="flex gap-3">
               <button
@@ -191,18 +273,18 @@
                 class="flex-1 px-4 py-2.5 bg-warm-100 text-dark-100 rounded-xl font-medium hover:bg-warm-200 transition-all duration-200 active:scale-95"
                 :disabled="deleting"
               >
-                Cancel
+                取消
               </button>
               <button
                 @click="executeDelete"
-                class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-700 transition-all duration-200 flex items-center justify-center gap-2 active:scale-95"
+                class="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl font-medium hover:bg-red-500 transition-all duration-200 flex items-center justify-center gap-2 active:scale-95"
                 :disabled="deleting"
               >
                 <svg v-if="deleting" class="w-4 h-4 spinner" fill="none" viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                   <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
                 </svg>
-                {{ deleting ? 'Deleting...' : 'Delete' }}
+                {{ deleting ? '删除中...' : '删除' }}
               </button>
             </div>
           </div>
@@ -222,6 +304,46 @@ const allSkills = ref([])
 const loading = ref(true)
 const error = ref(null)
 
+const agentStages = [
+  {
+    id: 'requirement',
+    label: '需求收集'
+  },
+  {
+    id: 'writer',
+    label: '内容写作'
+  },
+  {
+    id: 'reviewer',
+    label: '质量审查'
+  },
+  {
+    id: 'revision',
+    label: '修订完善'
+  }
+]
+
+const overlayHighlights = [
+  {
+    title: '材料抽取',
+    tag: '输入',
+    tagClass: 'bg-signal-200 text-dark-300',
+    description: '从上传材料中抽取事实与必填字段。'
+  },
+  {
+    title: 'Skill-Fixer',
+    tag: '覆盖',
+    tagClass: 'bg-anthropic-orange/15 text-anthropic-orange-light',
+    description: '为本次会话补充规范、准则与章节提示。'
+  },
+  {
+    title: '提示词合并',
+    tag: '运行时',
+    tagClass: 'bg-warm-200 text-dark-100',
+    description: '在不修改基础 Skill 的前提下进行增强。'
+  }
+]
+
 // Delete dialog state
 const showDeleteDialog = ref(false)
 const skillToDelete = ref(null)
@@ -239,7 +361,7 @@ const fetchSkills = async () => {
     const response = await api.get('/skills/')
     allSkills.value = response.data
   } catch (e) {
-    error.value = 'Please ensure the backend server is running on port 8000'
+    error.value = '请确认后端服务已在 8000 端口运行'
     console.error('Failed to fetch skills:', e)
   } finally {
     loading.value = false
@@ -280,7 +402,7 @@ const executeDelete = async () => {
     skillToDelete.value = null
   } catch (e) {
     console.error('Failed to delete skill:', e)
-    alert(e.response?.data?.detail || 'Failed to delete skill. Please try again.')
+    alert(e.response?.data?.detail || '删除失败，请重试。')
   } finally {
     deleting.value = false
   }

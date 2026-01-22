@@ -2,8 +2,8 @@
   <div class="max-w-4xl mx-auto">
     <!-- Header -->
     <div class="mb-8">
-      <h1 class="text-2xl font-bold text-dark-300 mb-2">Settings</h1>
-      <p class="text-dark-50">Configure your LLM provider and API settings</p>
+      <h1 class="text-2xl font-display font-bold text-dark-300 mb-2">设置</h1>
+      <p class="text-dark-50">配置 LLM 提供商与 API 参数</p>
     </div>
 
     <!-- Current Status -->
@@ -12,28 +12,28 @@
         <div class="flex items-center gap-4">
           <div
             class="w-12 h-12 rounded-xl flex items-center justify-center"
-            :class="currentConfig.has_api_key || currentConfig.has_github_token ? 'bg-green-100' : 'bg-red-100'"
+            :class="currentConfig.has_api_key || currentConfig.has_github_token ? 'bg-green-900/40' : 'bg-red-900/40'"
           >
             <svg
               v-if="currentConfig.has_api_key || currentConfig.has_github_token"
-              class="w-6 h-6 text-green-600"
+              class="w-6 h-6 text-green-300"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
             >
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
             </svg>
-            <svg v-else class="w-6 h-6 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg v-else class="w-6 h-6 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
             </svg>
           </div>
           <div>
-            <h3 class="font-semibold text-dark-300">{{ currentConfig.provider_name || 'Not Configured' }}</h3>
+            <h3 class="font-semibold text-dark-300">{{ currentConfig.provider_name || '未配置' }}</h3>
             <p class="text-sm text-dark-50">
               <span v-if="currentConfig.has_api_key || currentConfig.has_github_token">
-                Model: {{ currentConfig.model }}
+                模型：{{ currentConfig.model }}
               </span>
-              <span v-else class="text-red-500">API key not configured</span>
+              <span v-else class="text-red-300">未配置 API Key</span>
             </p>
           </div>
         </div>
@@ -48,7 +48,7 @@
 
     <!-- Provider Selection -->
     <div class="bg-warm-50 rounded-2xl border border-warm-300 p-6 mb-6">
-      <h2 class="text-lg font-semibold text-dark-300 mb-4">Select Provider</h2>
+      <h2 class="text-lg font-semibold text-dark-300 mb-4">选择提供商</h2>
 
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
         <button
@@ -59,21 +59,21 @@
           :class="[
             selectedPreset?.id === preset.id
               ? 'border-anthropic-orange bg-anthropic-orange-light/10'
-              : 'border-warm-300 hover:border-warm-400 bg-white'
+              : 'border-warm-300 hover:border-warm-400 bg-warm-100'
           ]"
         >
           <div class="flex items-center gap-3 mb-2">
             <div class="w-8 h-8 rounded-lg bg-warm-200 flex items-center justify-center">
               <span class="text-sm font-bold text-dark-100">{{ preset.name.charAt(0) }}</span>
             </div>
-            <span class="font-medium text-dark-300">{{ preset.name }}</span>
-          </div>
+          <span class="font-medium text-dark-300">{{ preset.name }}</span>
+        </div>
           <p class="text-xs text-dark-50 truncate">{{ preset.base_url }}</p>
           <div v-if="preset.requires_oauth" class="mt-2">
-            <span class="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">OAuth</span>
+            <span class="text-xs bg-signal-100 text-signal-700 px-2 py-0.5 rounded-full">OAuth</span>
           </div>
           <div v-if="preset.no_api_key" class="mt-2">
-            <span class="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">No API Key</span>
+            <span class="text-xs bg-green-900/30 text-green-300 px-2 py-0.5 rounded-full">无需 API Key</span>
           </div>
         </button>
       </div>
@@ -81,25 +81,25 @@
 
     <!-- Configuration Form -->
     <div v-if="selectedPreset" class="bg-warm-50 rounded-2xl border border-warm-300 p-6 mb-6">
-      <h2 class="text-lg font-semibold text-dark-300 mb-4">Configure {{ selectedPreset.name }}</h2>
+      <h2 class="text-lg font-semibold text-dark-300 mb-4">配置 {{ selectedPreset.name }}</h2>
 
       <!-- GitHub OAuth -->
       <div v-if="selectedPreset.requires_oauth" class="mb-6">
-        <div v-if="currentConfig.github_user" class="flex items-center justify-between p-4 bg-green-50 rounded-xl border border-green-200">
+        <div v-if="currentConfig.github_user" class="flex items-center justify-between p-4 bg-green-900/30 rounded-xl border border-green-500/40">
           <div class="flex items-center gap-3">
-            <svg class="w-6 h-6 text-green-600" fill="currentColor" viewBox="0 0 24 24">
+            <svg class="w-6 h-6 text-green-300" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
             </svg>
             <div>
-              <p class="font-medium text-green-800">Connected as {{ currentConfig.github_user }}</p>
-              <p class="text-sm text-green-600">GitHub Copilot ready to use</p>
+              <p class="font-medium text-green-200">已连接 {{ currentConfig.github_user }}</p>
+              <p class="text-sm text-green-300">GitHub Copilot 已就绪</p>
             </div>
           </div>
           <button
             @click="logoutGitHub"
-            class="px-4 py-2 text-sm text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+            class="px-4 py-2 text-sm text-red-300 hover:bg-red-900/30 rounded-lg transition-colors"
           >
-            Disconnect
+            断开连接
           </button>
         </div>
 
@@ -110,7 +110,7 @@
             <svg class="w-16 h-16 mx-auto mb-4 text-dark-50" fill="currentColor" viewBox="0 0 24 24">
               <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
             </svg>
-            <p class="text-dark-100 mb-4">Login with GitHub to use Copilot models</p>
+            <p class="text-dark-100 mb-4">登录 GitHub 以使用 Copilot 模型</p>
             <button
               @click="startDeviceFlow"
               :disabled="githubLoading"
@@ -119,17 +119,17 @@
               <svg class="w-5 h-5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/>
               </svg>
-              {{ githubLoading ? 'Loading...' : 'Login with GitHub' }}
+              {{ githubLoading ? '加载中...' : '登录 GitHub' }}
             </button>
             <p class="text-xs text-dark-50 mt-4">
-              Requires GitHub Copilot subscription
+              需要 GitHub Copilot 订阅
             </p>
           </div>
 
           <!-- Device code display -->
           <div v-else-if="deviceFlow.userCode" class="space-y-4">
             <div class="bg-warm-100 rounded-xl p-6 border border-warm-300">
-              <p class="text-sm text-dark-50 mb-2">Enter this code on GitHub:</p>
+              <p class="text-sm text-dark-50 mb-2">在 GitHub 输入验证码：</p>
               <div class="text-3xl font-mono font-bold text-dark-300 tracking-widest mb-4">
                 {{ deviceFlow.userCode }}
               </div>
@@ -141,7 +141,7 @@
                 <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
                 </svg>
-                Open GitHub
+                打开 GitHub
               </a>
             </div>
 
@@ -150,14 +150,14 @@
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
               </svg>
-              <span>{{ deviceFlow.statusMessage || 'Waiting for authorization...' }}</span>
+              <span>{{ deviceFlow.statusMessage || '等待授权...' }}</span>
             </div>
 
             <button
               @click="cancelDeviceFlow"
               class="text-sm text-dark-50 hover:text-red-500 transition-colors"
             >
-              Cancel
+              取消
             </button>
           </div>
         </div>
@@ -165,35 +165,35 @@
 
       <!-- API Key Input -->
       <div v-if="!selectedPreset.requires_oauth && !selectedPreset.no_api_key" class="mb-4">
-        <label class="block text-sm font-medium text-dark-100 mb-2">API Key</label>
+        <label class="block text-sm font-medium text-dark-100 mb-2">API Key（密钥）</label>
         <input
           v-model="formData.api_key"
           type="password"
-          placeholder="Enter your API key"
-          class="w-full px-4 py-3 bg-white border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+          placeholder="请输入 API Key（密钥）"
+          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         />
       </div>
 
       <!-- Base URL (Advanced) -->
       <div class="mb-4">
         <label class="block text-sm font-medium text-dark-100 mb-2">
-          Base URL
-          <span class="text-dark-50 font-normal">(Advanced)</span>
+          基础地址（Base URL）
+          <span class="text-dark-50 font-normal">(高级)</span>
         </label>
         <input
           v-model="formData.base_url"
           type="text"
           :placeholder="selectedPreset.base_url"
-          class="w-full px-4 py-3 bg-white border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         />
       </div>
 
       <!-- Model Selection -->
       <div class="mb-4">
-        <label class="block text-sm font-medium text-dark-100 mb-2">Model</label>
+        <label class="block text-sm font-medium text-dark-100 mb-2">模型</label>
         <select
           v-model="formData.model"
-          class="w-full px-4 py-3 bg-white border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         >
           <option v-for="model in selectedPreset.models" :key="model" :value="model">
             {{ model }}
@@ -204,7 +204,7 @@
       <!-- Temperature -->
       <div class="mb-6">
         <label class="block text-sm font-medium text-dark-100 mb-2">
-          Temperature: {{ formData.temperature }}
+          温度：{{ formData.temperature }}
         </label>
         <input
           v-model.number="formData.temperature"
@@ -215,8 +215,8 @@
           class="w-full accent-anthropic-orange"
         />
         <div class="flex justify-between text-xs text-dark-50 mt-1">
-          <span>Precise (0)</span>
-          <span>Creative (1)</span>
+          <span>严谨 (0)</span>
+          <span>创造 (1)</span>
         </div>
       </div>
 
@@ -231,7 +231,7 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          {{ testing ? 'Testing...' : 'Test Connection' }}
+          {{ testing ? '测试中...' : '测试连接' }}
         </button>
         <button
           @click="saveConfig"
@@ -242,41 +242,41 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
           </svg>
-          {{ saving ? 'Saving...' : 'Save Configuration' }}
+          {{ saving ? '保存中...' : '保存配置' }}
         </button>
       </div>
 
       <!-- Test Result -->
-      <div
-        v-if="testResult"
-        class="mt-4 p-4 rounded-xl"
-        :class="testResult.success ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'"
-      >
-        <div class="flex items-start gap-3">
-          <svg
-            v-if="testResult.success"
-            class="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+    <div
+      v-if="testResult"
+      class="mt-4 p-4 rounded-xl"
+      :class="testResult.success ? 'bg-green-900/30 border border-green-500/40' : 'bg-red-900/30 border border-red-500/40'"
+    >
+      <div class="flex items-start gap-3">
+        <svg
+          v-if="testResult.success"
+          class="w-5 h-5 text-green-300 flex-shrink-0 mt-0.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7" />
           </svg>
-          <svg
-            v-else
-            class="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5"
-            fill="none"
-            stroke="currentColor"
-            viewBox="0 0 24 24"
-          >
+        <svg
+          v-else
+          class="w-5 h-5 text-red-300 flex-shrink-0 mt-0.5"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
           </svg>
           <div>
-            <p :class="testResult.success ? 'text-green-800' : 'text-red-800'" class="font-medium">
+            <p :class="testResult.success ? 'text-green-200' : 'text-red-200'" class="font-medium">
               {{ testResult.message }}
             </p>
-            <p v-if="testResult.response" class="text-sm text-green-600 mt-1">
-              Response: {{ testResult.response }}
+            <p v-if="testResult.response" class="text-sm text-green-300 mt-1">
+              响应：{{ testResult.response }}
             </p>
           </div>
         </div>
@@ -285,27 +285,27 @@
 
     <!-- Help Section -->
     <div class="bg-warm-100 rounded-2xl p-6">
-      <h3 class="font-semibold text-dark-300 mb-3">Need Help?</h3>
+      <h3 class="font-semibold text-dark-300 mb-3">需要帮助？</h3>
       <ul class="space-y-2 text-sm text-dark-50">
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
-          <span><strong>DeepSeek:</strong> Get API key from <a href="https://platform.deepseek.com/" target="_blank" class="text-anthropic-orange hover:underline">platform.deepseek.com</a></span>
+          <span><strong>DeepSeek：</strong> 在 <a href="https://platform.deepseek.com/" target="_blank" class="text-anthropic-orange hover:underline">platform.deepseek.com</a> 获取 API Key</span>
         </li>
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
-          <span><strong>OpenAI:</strong> Get API key from <a href="https://platform.openai.com/api-keys" target="_blank" class="text-anthropic-orange hover:underline">platform.openai.com</a></span>
+          <span><strong>OpenAI：</strong> 在 <a href="https://platform.openai.com/api-keys" target="_blank" class="text-anthropic-orange hover:underline">platform.openai.com</a> 获取 API Key</span>
         </li>
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
-          <span><strong>Google AI Studio:</strong> Get API key from <a href="https://aistudio.google.com/apikey" target="_blank" class="text-anthropic-orange hover:underline">aistudio.google.com</a></span>
+          <span><strong>Google AI Studio：</strong> 在 <a href="https://aistudio.google.com/apikey" target="_blank" class="text-anthropic-orange hover:underline">aistudio.google.com</a> 获取 API Key</span>
         </li>
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
-          <span><strong>GitHub Copilot:</strong> Requires active GitHub Copilot subscription</span>
+          <span><strong>GitHub Copilot：</strong> 需要有效订阅</span>
         </li>
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
-          <span><strong>Ollama:</strong> Run locally with <code class="bg-warm-200 px-1 rounded">ollama serve</code></span>
+          <span><strong>Ollama：</strong> 本地运行 <code class="bg-warm-200 px-1 rounded">ollama serve</code></span>
         </li>
       </ul>
     </div>
@@ -416,12 +416,12 @@ const saveConfig = async () => {
 
     testResult.value = {
       success: true,
-      message: 'Configuration saved successfully!',
+      message: '配置保存成功！',
     }
   } catch (e) {
     testResult.value = {
       success: false,
-      message: e.response?.data?.detail || 'Failed to save configuration',
+      message: e.response?.data?.detail || '配置保存失败',
     }
   } finally {
     saving.value = false
@@ -450,7 +450,7 @@ const startDeviceFlow = async () => {
   } catch (e) {
     testResult.value = {
       success: false,
-      message: e.response?.data?.detail || 'Failed to start GitHub login',
+      message: e.response?.data?.detail || 'GitHub 登录启动失败',
     }
   } finally {
     githubLoading.value = false
@@ -463,7 +463,7 @@ const startPolling = () => {
     clearInterval(deviceFlow.pollTimer)
   }
 
-  deviceFlow.statusMessage = 'Waiting for authorization...'
+  deviceFlow.statusMessage = '等待授权...'
 
   const poll = async () => {
     try {
@@ -486,18 +486,18 @@ const startPolling = () => {
 
           testResult.value = {
             success: true,
-            message: `GitHub connected as ${data.user}!`,
+            message: `GitHub 已连接：${data.user}`,
           }
           break
 
         case 'pending':
-          deviceFlow.statusMessage = 'Waiting for authorization...'
+          deviceFlow.statusMessage = '等待授权...'
           break
 
         case 'slow_down':
           // Increase interval and restart timer
           deviceFlow.interval = Math.min(deviceFlow.interval + 5, 30)
-          deviceFlow.statusMessage = `Slowing down polling (${deviceFlow.interval}s)...`
+          deviceFlow.statusMessage = `放慢轮询频率（${deviceFlow.interval}s）...`
           // Restart timer with new interval
           if (deviceFlow.pollTimer) {
             clearInterval(deviceFlow.pollTimer)
@@ -513,7 +513,7 @@ const startPolling = () => {
           deviceFlow.started = false
           testResult.value = {
             success: false,
-            message: 'Device code expired. Please try again.',
+            message: '设备码已过期，请重试。',
           }
           break
 
@@ -525,16 +525,16 @@ const startPolling = () => {
           deviceFlow.started = false
           testResult.value = {
             success: false,
-            message: 'Authorization was denied.',
+            message: '授权被拒绝。',
           }
           break
 
         default:
-          deviceFlow.statusMessage = data.message || 'Checking...'
+          deviceFlow.statusMessage = data.message || '状态检查中...'
       }
     } catch (e) {
       console.error('Polling error:', e)
-      deviceFlow.statusMessage = 'Error checking status...'
+      deviceFlow.statusMessage = '状态检查失败...'
     }
   }
 

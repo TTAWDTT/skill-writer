@@ -7,32 +7,43 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Anthropic 品牌色
+        // Primary accent
         'anthropic': {
-          'orange': '#D97757',
-          'orange-light': '#E8A88E',
-          'orange-dark': '#C25E3D',
+          'orange': '#E36A3A',
+          'orange-light': '#F0A384',
+          'orange-dark': '#C7562C',
         },
-        // 暖色调背景
+        // Dark surfaces
         'warm': {
-          '50': '#FDFCFB',
-          '100': '#FAF9F6',
-          '200': '#F5F3EF',
-          '300': '#E8E4DD',
-          '400': '#D1CBC0',
+          '50': '#0E1116',
+          '100': '#141A21',
+          '200': '#1B2230',
+          '300': '#243044',
+          '400': '#2F3C55',
         },
-        // 深色模式
+        // Text tones
         'dark': {
-          '50': '#2D2D2B',
-          '100': '#252523',
-          '200': '#1F1F1D',
-          '300': '#191918',
-          '400': '#131312',
+          '50': '#9FB1C3',
+          '100': '#B7C3D6',
+          '200': '#D5DDE9',
+          '300': '#EEF2F7',
+          '400': '#F8FAFC',
+        },
+        // Signal accents
+        'signal': {
+          '50': '#102A2E',
+          '100': '#16363C',
+          '200': '#1D4A52',
+          '300': '#23606B',
+          '400': '#2B7986',
+          '500': '#3194A4',
+          '600': '#46AEBB',
+          '700': '#77CBD3',
         },
       },
       fontFamily: {
-        'sans': ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        'serif': ['Palatino', 'Georgia', 'serif'],
+        'sans': ['"IBM Plex Sans"', '"Noto Sans SC"', 'sans-serif'],
+        'display': ['"Space Grotesk"', '"Noto Sans SC"', 'sans-serif'],
       },
       borderRadius: {
         'xl': '1rem',
