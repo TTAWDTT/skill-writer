@@ -29,7 +29,8 @@ class Settings(BaseSettings):
 
     # LLM 配置
     LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
-    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com")
+    # OpenAI SDK 期望 base_url 包含 /v1
+    LLM_BASE_URL: str = os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1")
     LLM_MODEL: str = os.getenv("LLM_MODEL", "deepseek-chat")
     LLM_TEMPERATURE: float = 0.3
     LLM_MAX_RETRIES: int = 3

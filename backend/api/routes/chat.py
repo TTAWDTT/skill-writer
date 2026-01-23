@@ -9,6 +9,8 @@ from typing import Optional, List, Any, Dict
 from pathlib import Path
 import re
 import json
+import logging
+import time
 
 from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
@@ -18,7 +20,7 @@ from backend.core.agents.file_extractor import (
     generate_field_from_files,
 )
 from backend.core.agents.skill_fixer_agent import SkillFixerAgent
-from backend.core.llm.config_store import has_llm_credentials
+from backend.core.llm.config_store import has_llm_credentials, get_llm_config
 
 try:
     import multipart  # noqa: F401
@@ -27,6 +29,25 @@ except Exception:
     MULTIPART_AVAILABLE = False
 
 router = APIRouter()
+
+logger = logging.getLogger(__name__)
+
+
+def _redact_secrets(message: str) -> str:
+    if not message:
+        return message
+    # Redact common token formats (best-effort)
+    patterns = [
+        (re.compile(r"(sk-[A-Za-z0-9]{8,})"), "sk-***"),
+        (re.compile(r"(gho_[A-Za-z0-9]{8,})"), "gho_***"),
+        (re.compile(r"(Bearer\\s+)[A-Za-z0-9._\\-]{10,}"), r"\\1***"),
+        (re.compile(r"(api[-_ ]?key\\s*[:=]\\s*)([^\\s,;]+)", re.IGNORECASE), r"\\1***"),
+        (re.compile(r"(\*{2,}[A-Za-z0-9]{2,})"), "***"),
+    ]
+    sanitized = message
+    for pattern, replacement in patterns:
+        sanitized = pattern.sub(replacement, sanitized)
+    return sanitized
 
 
 def _ensure_llm_configured():
@@ -468,7 +489,8 @@ async def _handle_parsed_upload(
     parsed_files: List[dict],
     file_summaries: List[str],
 ):
-    _ensure_llm_configured()
+    # 上传材料应尽量“可用优先”：即使模型未配置/暂时不可用，也先保存解析出的文本，
+    # 只是跳过自动信息提取与 Skill Fixer（依赖 LLM）。
     if not parsed_files:
         return {
             "success": False,
@@ -485,16 +507,45 @@ async def _handle_parsed_upload(
         "external_information": "",
         "summaries": "",
     }
+    warning: Optional[str] = None
+    extraction_ms: Optional[int] = None
+    llm_used: Optional[dict] = None
 
-    try:
-        extraction_result = await extract_info_from_multiple_files(
-            files=parsed_files,
-            skill_fields=skill_fields,
-            skill_name=skill.metadata.name,
-            existing_requirements=session.requirements,
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"文件信息提取失败: {str(e)}") from e
+    if has_llm_credentials():
+        try:
+            cfg = get_llm_config()
+            llm_used = {
+                "provider_name": getattr(cfg, "provider_name", ""),
+                "provider": getattr(cfg, "provider", ""),
+                "base_url": getattr(cfg, "base_url", ""),
+                "model": getattr(cfg, "model", ""),
+            }
+            logger.info(
+                "[upload] start llm extraction session=%s files=%s provider=%s model=%s base_url=%s",
+                session.session_id,
+                len(parsed_files),
+                getattr(cfg, "provider_name", ""),
+                getattr(cfg, "model", ""),
+                getattr(cfg, "base_url", ""),
+            )
+            start_ts = time.time()
+            extraction_result = await extract_info_from_multiple_files(
+                files=parsed_files,
+                skill_fields=skill_fields,
+                skill_name=skill.metadata.name,
+                existing_requirements=session.requirements,
+            )
+            extraction_ms = int((time.time() - start_ts) * 1000)
+        except Exception as e:
+            # 不阻断上传：允许用户继续生成/手工补充，只是失去自动提取能力
+            warning = f"文件已解析并保存，但自动信息提取失败：{_redact_secrets(str(e))}"
+            extraction_result = {
+                "extracted_fields": {},
+                "external_information": "",
+                "summaries": "",
+            }
+    else:
+        warning = "模型未配置：文件已解析并保存，但不会自动提取信息。"
 
     extraction_result["extracted_fields"] = _normalize_extracted_fields(
         extraction_result.get("extracted_fields", {}),
@@ -517,24 +568,25 @@ async def _handle_parsed_upload(
         session.append_external_info(external_info)
 
     # 基于上传材料修补 Skill（仅当前会话）
-    try:
-        fixer = SkillFixerAgent()
-        fixer_result = await fixer.run(
-            skill=skill,
-            extracted_fields=extraction_result.get("extracted_fields", {}),
-            external_information=session.external_information,
-            file_summaries=extraction_result.get("summaries", ""),
-        )
-        session.skill_overlay = {
-            "writing_guidelines_additions": fixer_result.writing_guidelines_additions,
-            "global_principles": fixer_result.global_principles,
-            "section_overrides": fixer_result.section_overrides,
-            "relax_requirements": fixer_result.relax_requirements,
-            "material_context": fixer_result.material_context,
-            "section_prompt_overrides": fixer_result.section_prompt_overrides,
-        }
-    except Exception as e:
-        print(f"[Skill Fixer Warning] {e}")
+    if warning is None:
+        try:
+            fixer = SkillFixerAgent()
+            fixer_result = await fixer.run(
+                skill=skill,
+                extracted_fields=extraction_result.get("extracted_fields", {}),
+                external_information=session.external_information,
+                file_summaries=extraction_result.get("summaries", ""),
+            )
+            session.skill_overlay = {
+                "writing_guidelines_additions": fixer_result.writing_guidelines_additions,
+                "global_principles": fixer_result.global_principles,
+                "section_overrides": fixer_result.section_overrides,
+                "relax_requirements": fixer_result.relax_requirements,
+                "material_context": fixer_result.material_context,
+                "section_prompt_overrides": fixer_result.section_prompt_overrides,
+            }
+        except Exception as e:
+            print(f"[Skill Fixer Warning] {e}")
 
     # 将提取的字段合并到需求中
     extracted_fields = extraction_result.get("extracted_fields", {})
@@ -565,6 +617,9 @@ async def _handle_parsed_upload(
         "success": True,
         "session_id": session.session_id,
         "message": f"成功处理 {len(parsed_files)} 个文件",
+        "warning": warning,
+        "llm_used": llm_used,
+        "extraction_ms": extraction_ms,
         "file_results": file_summaries,
         "extracted_fields": extracted_fields,
         "external_information": external_info[:500] + "..." if len(external_info) > 500 else external_info,
@@ -603,8 +658,6 @@ async def upload_files_json(
 
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
-
-    _ensure_llm_configured()
 
     # 支持的文件类型
     allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
@@ -684,8 +737,6 @@ if MULTIPART_AVAILABLE:
 
         if not skill:
             raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
-
-        _ensure_llm_configured()
 
         # 支持的文件类型
         allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
@@ -953,6 +1004,20 @@ async def start_generation(session_id: str):
                     missing_fields.append(field.name)
 
     if missing_fields:
+        # 前端已去除“必填字段”表单展示，因此这里改为“软校验”：
+        # - 有材料：允许继续生成，后续在写作过程中让模型基于材料补全/自洽
+        # - 无材料：仍提示用户补充关键信息
+        if session.uploaded_files:
+            session.phase = "writing"
+            workflow.save_session(session)
+            return {
+                "success": True,
+                "session_id": session_id,
+                "phase": "writing",
+                "message": "将基于已上传材料继续生成（部分字段缺失将自动补全/弱化）。",
+                "missing_fields": missing_fields,
+                "warning": f"以下字段在材料中未明确提取到：{', '.join(missing_fields)}",
+            }
         return {
             "success": False,
             "session_id": session_id,

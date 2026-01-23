@@ -1,6 +1,7 @@
 """
 FastAPI 主应用
 """
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -18,6 +19,15 @@ get_database()
 # 加载 Skills
 _skill_count = init_skills_from_directory()
 print(f"[OK] Loaded {_skill_count} skills from files")
+
+# Logging（让应用内 logger.info 在 uvicorn 下可见）
+root_logger = logging.getLogger()
+if not root_logger.handlers:
+    logging.basicConfig(level=logging.INFO)
+root_logger.setLevel(logging.INFO)
+logging.getLogger("backend").setLevel(logging.INFO)
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 app = FastAPI(
     title=settings.APP_NAME,

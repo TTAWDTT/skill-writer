@@ -4,6 +4,7 @@ Configuration API 路由
 """
 import os
 import asyncio
+import re
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 from typing import Optional
@@ -44,6 +45,22 @@ class TestConnectionRequest(BaseModel):
     base_url: Optional[str] = None
     model: Optional[str] = None
     github_token: Optional[str] = None
+
+
+def _sanitize_error_message(message: str) -> str:
+    if not message:
+        return message
+
+    patterns = [
+        (r"(sk-[A-Za-z0-9]{8,})", "sk-***"),
+        (r"(gho_[A-Za-z0-9]{8,})", "gho_***"),
+        (r"(Bearer\\s+)[A-Za-z0-9._\\-]{10,}", r"\\1***"),
+        (r"(Authorization:\\s*token\\s+)[A-Za-z0-9_\\-]{10,}", r"\\1***"),
+    ]
+    sanitized = message
+    for pattern, replacement in patterns:
+        sanitized = re.sub(pattern, replacement, sanitized)
+    return sanitized
 
 
 @router.get("/llm")
@@ -93,11 +110,30 @@ async def update_config(request: ConfigUpdateRequest):
 
     if request.provider in presets:
         preset = presets[request.provider]
+        new_base_url = request.base_url or preset["base_url"]
+        new_provider = preset["provider"]
+        new_provider_name = preset["provider_name"]
+
+        # 避免“切换服务商但复用旧 key”导致错误显示/误用：只有在服务商 + base_url 未变化时才保留旧 key
+        if request.api_key is None:
+            api_key = (
+                current_config.api_key
+                if (
+                    current_config.provider == new_provider
+                    and (current_config.base_url or "") == (new_base_url or "")
+                    and (current_config.provider_name or "") == (new_provider_name or "")
+                )
+                else ""
+            )
+        else:
+            # 允许显式清空（传空字符串）
+            api_key = request.api_key
+
         new_config = LLMConfig(
-            provider=preset["provider"],
-            provider_name=preset["provider_name"],
-            api_key=request.api_key or current_config.api_key,
-            base_url=request.base_url or preset["base_url"],
+            provider=new_provider,
+            provider_name=new_provider_name,
+            api_key=api_key,
+            base_url=new_base_url,
             model=request.model or preset["model"],
             temperature=request.temperature if request.temperature is not None else current_config.temperature,
             github_token=current_config.github_token,
@@ -105,11 +141,28 @@ async def update_config(request: ConfigUpdateRequest):
         )
     else:
         # 自定义配置
+        new_base_url = request.base_url or current_config.base_url
+        new_provider = LLMProviderType.OPENAI_COMPATIBLE
+        new_provider_name = "Custom"
+
+        if request.api_key is None:
+            api_key = (
+                current_config.api_key
+                if (
+                    current_config.provider == new_provider
+                    and (current_config.base_url or "") == (new_base_url or "")
+                    and (current_config.provider_name or "") == (new_provider_name or "")
+                )
+                else ""
+            )
+        else:
+            api_key = request.api_key
+
         new_config = LLMConfig(
-            provider=LLMProviderType.OPENAI_COMPATIBLE,
-            provider_name="Custom",
-            api_key=request.api_key or current_config.api_key,
-            base_url=request.base_url or current_config.base_url,
+            provider=new_provider,
+            provider_name=new_provider_name,
+            api_key=api_key,
+            base_url=new_base_url,
             model=request.model or current_config.model,
             temperature=request.temperature if request.temperature is not None else current_config.temperature,
             github_token=current_config.github_token,
@@ -132,20 +185,43 @@ async def test_connection(request: TestConnectionRequest):
     try:
         if request.provider in presets:
             preset = presets[request.provider]
+            base_url = request.base_url or preset["base_url"]
+            model = request.model or preset["model"]
+
+            # 支持使用已保存的 API key（前端不回显 key，刷新后测试仍可用）
+            if request.api_key in (None, "use_saved"):
+                api_key = (
+                    current_config.api_key
+                    if (
+                        current_config.provider == preset["provider"]
+                        and (current_config.base_url or "") == (base_url or "")
+                        and (current_config.provider_name or "") == (preset["provider_name"] or "")
+                    )
+                    else ""
+                )
+            else:
+                api_key = request.api_key
+
             config = LLMConfig(
                 provider=preset["provider"],
                 provider_name=preset["provider_name"],
-                api_key=request.api_key or "",
-                base_url=request.base_url or preset["base_url"],
-                model=request.model or preset["model"],
+                api_key=api_key or "",
+                base_url=base_url,
+                model=model,
                 github_token=current_config.github_token if request.github_token == "use_saved" else request.github_token,
             )
         else:
+            base_url = request.base_url or ""
+            model = request.model or ""
+            api_key = request.api_key
+            if api_key in (None, "use_saved"):
+                api_key = current_config.api_key if (current_config.base_url or "") == (base_url or "") else ""
+
             config = LLMConfig(
                 provider=LLMProviderType.OPENAI_COMPATIBLE,
-                api_key=request.api_key or "",
-                base_url=request.base_url or "",
-                model=request.model or "",
+                api_key=api_key or "",
+                base_url=base_url,
+                model=model,
                 github_token=current_config.github_token if request.github_token == "use_saved" else request.github_token,
             )
 
@@ -162,7 +238,7 @@ async def test_connection(request: TestConnectionRequest):
     except Exception as e:
         return {
             "success": False,
-            "message": str(e),
+            "message": _sanitize_error_message(str(e)),
         }
 
 
@@ -180,7 +256,8 @@ async def github_device_code():
                 "https://github.com/login/device/code",
                 data={
                     "client_id": GITHUB_DEVICE_CLIENT_ID,
-                    # No scope needed for VSCode Copilot client
+                    # 显式请求基础用户信息权限，避免拿到“无权限 token”导致后续调用失败
+                    "scope": "read:user user:email",
                 },
                 headers={"Accept": "application/json"},
                 timeout=30.0,
@@ -250,6 +327,7 @@ async def github_device_poll(device_code: str = Query(...)):
                     "https://api.github.com/user",
                     headers={"Authorization": f"token {access_token}"},
                 )
+                user_response.raise_for_status()
                 user_data = user_response.json()
 
                 # 保存到配置

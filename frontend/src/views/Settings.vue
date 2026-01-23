@@ -165,17 +165,22 @@
 
       <!-- API Key Input -->
       <div v-if="!selectedPreset.requires_oauth && !selectedPreset.no_api_key" class="mb-4">
-        <label class="block text-sm font-medium text-dark-100 mb-2">API Key（密钥）</label>
+        <label class="block text-sm font-medium text-dark-100 mb-2">
+          {{ selectedPreset?.id === 'google_gemini' ? 'Google API Key（密钥）' : 'API Key（密钥）' }}
+        </label>
         <input
           v-model="formData.api_key"
           type="password"
           placeholder="请输入 API Key（密钥）"
           class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         />
+        <p v-if="selectedPreset?.id === 'google_gemini'" class="text-[11px] text-dark-50 mt-2">
+          Google AI Studio 不需要填写 Base URL；只需 API Key + 模型名即可。
+        </p>
       </div>
 
       <!-- Base URL (Advanced) -->
-      <div class="mb-4">
+      <div v-if="selectedPreset?.id !== 'google_gemini'" class="mb-4">
         <label class="block text-sm font-medium text-dark-100 mb-2">
           基础地址（Base URL）
           <span class="text-dark-50 font-normal">(高级)</span>
@@ -190,7 +195,10 @@
 
       <!-- Model Selection -->
       <div class="mb-4">
-        <label class="block text-sm font-medium text-dark-100 mb-2">模型</label>
+        <div class="flex items-center justify-between mb-2">
+          <label class="block text-sm font-medium text-dark-100">模型</label>
+          <span class="text-xs text-dark-50">固定列表</span>
+        </div>
         <select
           v-model="formData.model"
           class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
@@ -380,14 +388,37 @@ const testConnection = async () => {
   testResult.value = null
 
   try {
+    const canUseSavedKey = selectedPreset.value?.name === currentConfig.value?.provider_name
     const response = await api.post('/config/llm/test', {
       provider: selectedPreset.value.id,
-      api_key: formData.api_key || undefined,
+      api_key: formData.api_key ? formData.api_key : (canUseSavedKey && currentConfig.value?.has_api_key ? 'use_saved' : undefined),
       base_url: formData.base_url || undefined,
       model: formData.model || undefined,
       github_token: currentConfig.value.has_github_token ? 'use_saved' : undefined,
     })
     testResult.value = response.data
+
+    // 彻底避免“测试成功但刷新后不可用”：当用户手动输入了 key 且测试成功时，自动保存一次配置
+    if (testResult.value?.success && formData.api_key) {
+      try {
+        await api.post('/config/llm', {
+          provider: selectedPreset.value.id,
+          api_key: formData.api_key,
+          base_url: formData.base_url || undefined,
+          model: formData.model || undefined,
+          temperature: formData.temperature,
+        })
+        const configRes = await api.get('/config/llm')
+        currentConfig.value = configRes.data
+        testResult.value = {
+          ...testResult.value,
+          message: `${testResult.value.message || '连接成功'}（已自动保存配置）`,
+        }
+      } catch (e) {
+        // 自动保存失败不影响测试结果
+        console.error('Auto-save config failed:', e)
+      }
+    }
   } catch (e) {
     testResult.value = {
       success: false,
@@ -484,9 +515,16 @@ const startPolling = () => {
           const configRes = await api.get('/config/llm')
           currentConfig.value = configRes.data
 
-          testResult.value = {
-            success: true,
-            message: `GitHub 已连接：${data.user}`,
+          // 额外做一次 Copilot 可用性检查：GitHub 登录成功 ≠ Copilot token 一定可拿到
+          try {
+            const copilotTest = await api.post('/config/llm/test', { provider: 'github_copilot', github_token: 'use_saved' })
+            if (copilotTest.data?.success) {
+              testResult.value = { success: true, message: `GitHub 已连接：${data.user}（Copilot 可用）` }
+            } else {
+              testResult.value = { success: false, message: `GitHub 已连接，但 Copilot 不可用：${copilotTest.data?.message || '未知原因'}` }
+            }
+          } catch (e) {
+            testResult.value = { success: false, message: 'GitHub 已连接，但 Copilot 可用性检测失败。' }
           }
           break
 

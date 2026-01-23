@@ -22,7 +22,8 @@ class LLMConfig(BaseModel):
     """LLM 配置"""
     provider: LLMProviderType = LLMProviderType.OPENAI_COMPATIBLE
     api_key: str = ""
-    base_url: str = "https://api.deepseek.com"
+    # 注意：OpenAI SDK 期望 base_url 包含 /v1
+    base_url: str = "https://api.deepseek.com/v1"
     model: str = "deepseek-chat"
     temperature: float = 0.3
     max_tokens: int = 4096
@@ -40,7 +41,8 @@ PROVIDER_PRESETS = {
     "deepseek": {
         "provider": LLMProviderType.OPENAI_COMPATIBLE,
         "provider_name": "DeepSeek",
-        "base_url": "https://api.deepseek.com",
+        # OpenAI compatible endpoint root
+        "base_url": "https://api.deepseek.com/v1",
         "model": "deepseek-chat",
         "models": ["deepseek-chat", "deepseek-coder"],
     },
@@ -76,9 +78,40 @@ PROVIDER_PRESETS = {
     "google_gemini": {
         "provider": LLMProviderType.GOOGLE_GEMINI,
         "provider_name": "Google AI Studio",
+        # Gemini API root (models endpoint is `${base_url}/models`)
         "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        "model": "gemini-1.5-flash",
-        "models": ["gemini-2.0-flash-exp", "gemini-1.5-flash", "gemini-1.5-pro"],
+        # Default model
+        "model": "gemini-3-flash-preview",
+        # Curated list (from local docs); keep this list explicit to avoid relying on dynamic fetch.
+        "models": [
+            # Gemini 3 (preview)
+            "gemini-3-flash-preview",
+            "gemini-3-pro-preview",
+            "gemini-3-pro-image-preview",
+
+            # Gemini 2.5 Pro
+            "gemini-2.5-pro",
+            "gemini-2.5-pro-preview-03-25",
+            "gemini-2.5-pro-preview-05-06",
+            "gemini-2.5-pro-preview-06-05",
+
+            # Gemini 2.5 Flash
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.5-flash-image",
+            "gemini-2.5-flash-preview-05-20",
+            "gemini-2.5-flash-preview-09-25",
+            "gemini-2.5-flash-image-preview",
+
+            # Gemini 2.0
+            "gemini-2.0-flash",
+            "gemini-2.0-flash-001",
+            "gemini-2.0-flash-lite",
+            "gemini-2.0-flash-lite-001",
+            "gemini-2.0-flash-preview-image-generation",
+            "gemini-2.0-flash-lite-preview",
+            "gemini-2.0-flash-lite-preview-02-05",
+        ],
     },
     "github_copilot": {
         "provider": LLMProviderType.GITHUB_COPILOT,
@@ -118,7 +151,15 @@ def get_llm_config() -> LLMConfig:
         try:
             with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-                return LLMConfig(**data)
+                config = LLMConfig(**data)
+                # 轻量迁移：早期 DeepSeek 预设缺少 /v1 会导致 404
+                if (
+                    (config.provider_name or "").lower() == "deepseek"
+                    and (config.base_url or "").rstrip("/") == "https://api.deepseek.com"
+                ):
+                    config.base_url = "https://api.deepseek.com/v1"
+                    save_llm_config(config)
+                return config
         except Exception:
             pass
 
@@ -126,7 +167,7 @@ def get_llm_config() -> LLMConfig:
     import os
     return LLMConfig(
         api_key=os.getenv("LLM_API_KEY", ""),
-        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com"),
+        base_url=os.getenv("LLM_BASE_URL", "https://api.deepseek.com/v1"),
         model=os.getenv("LLM_MODEL", "deepseek-chat"),
     )
 

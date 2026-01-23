@@ -152,27 +152,40 @@ def parse_pptx(content: bytes) -> str:
 def parse_pdf(content: bytes) -> str:
     """解析 PDF 文件"""
     try:
-        # 尝试使用 PyPDF2
+        import io
+
+        # 优先使用 pypdf（更活跃的维护）
         try:
-            import PyPDF2
-            import io
+            from pypdf import PdfReader  # type: ignore
+
+            reader = PdfReader(io.BytesIO(content))
+            text_parts = []
+            for page in reader.pages:
+                text = page.extract_text() or ""
+                if text.strip():
+                    text_parts.append(text)
+            return "\n\n".join(text_parts).strip()
+        except Exception:
+            pass
+
+        # 兼容旧依赖 PyPDF2
+        try:
+            import PyPDF2  # type: ignore
 
             reader = PyPDF2.PdfReader(io.BytesIO(content))
             text_parts = []
-
             for page in reader.pages:
-                text = page.extract_text()
-                if text:
+                text = page.extract_text() or ""
+                if text.strip():
                     text_parts.append(text)
+            return "\n\n".join(text_parts).strip()
+        except Exception:
+            pass
 
-            return '\n\n'.join(text_parts)
-
-        except ImportError:
-            # 如果没有 PyPDF2，尝试简单的文本提取
-            text = content.decode('latin-1', errors='ignore')
-            # 提取 PDF 中的文本流
-            text_parts = re.findall(r'\(([^)]+)\)', text)
-            return '\n'.join(text_parts)
+        # 最后退化：简单文本流提取（效果有限，扫描版/图片 PDF 可能为空）
+        text = content.decode("latin-1", errors="ignore")
+        text_parts = re.findall(r"\(([^)]+)\)", text)
+        return "\n".join(text_parts).strip()
 
     except Exception as e:
         raise ValueError(f"Failed to parse PDF file: {str(e)}")

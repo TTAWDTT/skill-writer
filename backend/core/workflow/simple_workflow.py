@@ -13,7 +13,7 @@ from backend.core.skills.overlay import apply_skill_overlay
 from backend.core.agents.requirement_agent import RequirementAgent, RequirementState
 from backend.core.agents.writer_agent import WriterAgent, WritingState
 from backend.core.agents.reviewer_agent import ReviewerAgent
-from backend.core.agents.format_refiner_agent import FormatRefinerAgent
+from backend.core.agents.document_polisher_agent import DocumentPolisherAgent
 
 # 从独立模块导入 SessionState 避免循环依赖
 from backend.core.workflow.state import SessionState
@@ -56,7 +56,7 @@ class SimpleWorkflow:
         self.requirement_agent = RequirementAgent()
         self.writer_agent = WriterAgent()
         self.reviewer_agent = ReviewerAgent()
-        self.format_refiner_agent = FormatRefinerAgent()
+        self.document_polisher_agent = DocumentPolisherAgent()
         self.store = store or _get_database_store()
 
     def create_session(self, skill_id: str) -> SessionState:
@@ -252,8 +252,7 @@ class SimpleWorkflow:
             combined = "\n\n".join(contents)
             session.writing_state = asdict(state)
             final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
-            refined = self.format_refiner_agent.run(final_document, skill_name=skill.metadata.name)
-            session.final_document = refined.content
+            session.final_document = await self._polish_document(final_document, skill.metadata.name)
             session.phase = "complete"
             self.store.save(session)
 
@@ -454,8 +453,11 @@ class SimpleWorkflow:
             # 组装最终文档
             combined = "\n\n".join(all_content)
             final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
-            refined = self.format_refiner_agent.run(final_document, skill_name=skill.metadata.name)
-            session.final_document = refined.content
+
+            yield {"type": "postprocess_start", "name": "润色以及格式调整"}
+            session.final_document = await self._polish_document(final_document, skill.metadata.name)
+            yield {"type": "postprocess_complete", "name": "润色以及格式调整"}
+
             session.phase = "complete"
             self.store.save(session)
 
@@ -485,6 +487,23 @@ class SimpleWorkflow:
 4. 数据和论据充分
 5. 符合学术规范
 """
+
+    async def _polish_document(self, markdown: str, skill_name: str) -> str:
+        """
+        LLM-based post-processing for presentation.
+        If polishing fails, fall back to the original markdown.
+        """
+        try:
+            result = await self.document_polisher_agent.run(
+                document_markdown=markdown,
+                skill_name=skill_name,
+            )
+            content = (result or {}).get("content") or ""
+            if not content.strip():
+                return markdown.strip() + "\n"
+            return content.strip() + "\n"
+        except Exception:
+            return markdown.strip() + "\n"
 
 
 # 全局工作流实例

@@ -3,9 +3,12 @@ File Content Extractor - 使用 LLM 从上传的文件中提取信息
 """
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import logging
 
 from backend.core.llm.providers import get_llm_client
 from backend.core.skills.template_parser import parse_template_file
+
+logger = logging.getLogger(__name__)
 
 
 # 信息提取系统提示词
@@ -106,8 +109,7 @@ async def extract_info_from_file(
 
 ## 文档内容
 
-{file_content[:15000]}
-{f'... (文档过长，已截断，共 {len(file_content)} 字符)' if len(file_content) > 15000 else ''}
+{file_content}
 
 ---
 
@@ -122,6 +124,7 @@ async def extract_info_from_file(
 
     # 调用 LLM
     llm_client = get_llm_client()
+    logger.info("[extract] calling llm for file=%s chars=%s", filename, len(file_content or ""))
     response = await llm_client.chat(messages, temperature=0.2, max_tokens=4096)
 
     # 解析响应

@@ -369,9 +369,6 @@ const generateSkill = async () => {
 
     // Upload and generate
     const response = await api.post('/skills/create-from-template', formData, {
-      headers: {
-        'Content-Type': 'multipart/form-data'
-      },
       onUploadProgress: (progressEvent) => {
         const uploadPercent = Math.round((progressEvent.loaded * 30) / progressEvent.total)
         generationProgress.value = 10 + uploadPercent

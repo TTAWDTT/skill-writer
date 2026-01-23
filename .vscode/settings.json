@@ -32,6 +32,7 @@
     "python-envs.pythonProjects": [],
     "conventionalCommits.scopes": [
         "frontend",
-        "agent"
+        "agent",
+        "api"
     ]
 }

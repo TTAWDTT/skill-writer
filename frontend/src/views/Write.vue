@@ -230,6 +230,14 @@
         </div>
       </div>
 
+      <div v-else-if="isPostProcessing" class="px-4 py-3 border-b border-warm-300 bg-warm-100/60">
+        <div class="flex items-center gap-2">
+          <div class="w-4 h-4 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner"></div>
+          <span class="font-medium text-dark-300 text-sm">正在进行{{ postProcessLabel || '润色以及格式调整' }}...</span>
+        </div>
+        <p class="text-[11px] text-dark-50 mt-1">这一步会对“展示形式”进行优化，不改变事实内容。</p>
+      </div>
+
       <div class="flex-1 min-h-0 overflow-y-auto p-6">
         <Transition name="fade" mode="out-in">
           <div v-if="documentContent" key="content" class="markdown-content prose prose-warm max-w-none" v-html="renderedDocumentDebounced"></div>
@@ -288,6 +296,8 @@ const stageState = reactive({
   revise: 'pending'
 })
 const reviewSnapshot = ref(null)
+const isPostProcessing = ref(false)
+const postProcessLabel = ref('')
 
 // Session augmentation
 const externalInformation = ref('')
@@ -517,6 +527,8 @@ const startStreamGeneration = async () => {
   documentContent.value = ''
   writingProgress.value = { current: 0, total: 0 }
   resetStageState()
+  isPostProcessing.value = false
+  postProcessLabel.value = ''
 
   try {
     const eventSource = new EventSource(`/api/chat/generate/${sessionId.value}/stream`)
@@ -550,6 +562,7 @@ const startStreamGeneration = async () => {
           break
         case 'complete':
           isWriting.value = false
+          isPostProcessing.value = false
           currentSection.value = ''
           resetStageState()
           documentContent.value = data.document
@@ -558,9 +571,20 @@ const startStreamGeneration = async () => {
           break
         case 'error':
           isWriting.value = false
+          isPostProcessing.value = false
           resetStageState()
           closeEventSource()
           showToast('生成失败', data.error || '未知错误')
+          break
+
+        case 'postprocess_start':
+          isPostProcessing.value = true
+          postProcessLabel.value = data.name || '润色以及格式调整'
+          break
+
+        case 'postprocess_complete':
+          isPostProcessing.value = false
+          postProcessLabel.value = ''
           break
       }
     }
@@ -614,40 +638,67 @@ const readFileAsBase64 = (file) => {
   })
 }
 
+const uploadFilesMultipart = async (files) => {
+  const formDataUpload = new FormData()
+  files.forEach(file => formDataUpload.append('files', file))
+  // 不要手动设置 Content-Type，让浏览器自动带上 boundary，避免后端解析失败
+  return await api.post(`/chat/session/${sessionId.value}/upload`, formDataUpload, { timeout: 300000 })
+}
+
+const uploadFilesJson = async (files) => {
+  const payloadFiles = await Promise.all(files.map(readFileAsBase64))
+  return await api.post(`/chat/session/${sessionId.value}/upload-json`, { files: payloadFiles }, { timeout: 300000 })
+}
+
 const uploadFiles = async (files) => {
   if (!sessionId.value || files.length === 0) return
+  if (isUploading.value) return
   isUploading.value = true
   try {
-    const payloadFiles = await Promise.all(files.map(readFileAsBase64))
     let response = null
 
+    // 优先 multipart：避免 base64 JSON 体积膨胀导致 413/超时
     try {
-      response = await api.post(`/chat/session/${sessionId.value}/upload-json`, { files: payloadFiles })
-    } catch (jsonError) {
-      if (jsonError.response?.status === 404) {
-        const formDataUpload = new FormData()
-        files.forEach(file => formDataUpload.append('files', file))
-        response = await api.post(`/chat/session/${sessionId.value}/upload`, formDataUpload, {
-          headers: { 'Content-Type': 'multipart/form-data' }
-        })
+      response = await uploadFilesMultipart(files)
+    } catch (multipartError) {
+      const status = multipartError.response?.status
+      // 只有后端未注册 multipart 路由时（404）才回退 JSON；其余错误直接抛出，避免重复上传/重复提取
+      if (status === 404) {
+        response = await uploadFilesJson(files)
       } else {
-        throw jsonError
+        throw multipartError
       }
     }
 
     const result = response.data
     if (!result.success) {
-      showToast('处理失败', result.message || '文件处理失败')
+      const details = Array.isArray(result.file_results) ? result.file_results.join('\n') : ''
+      showToast('处理失败', [result.message || '文件处理失败', details].filter(Boolean).join('\n'))
       return
     }
 
+    if (result.warning) {
+      const llmLine = result.llm_used
+        ? `LLM：${result.llm_used.provider_name || result.llm_used.provider || 'unknown'} · ${result.llm_used.model || ''}`.trim()
+        : ''
+      const timeLine = typeof result.extraction_ms === 'number' ? `提取耗时：${Math.round(result.extraction_ms / 1000)}s` : ''
+      showToast('已上传', [result.warning, llmLine, timeLine].filter(Boolean).join('\n'))
+    }
     if (result.external_information) externalInformation.value = result.external_information
     await fetchSessionFiles()
     await fetchSessionMeta()
   } catch (e) {
     console.error('File upload failed:', e)
     if (notifyModelNotConfigured(e)) return
-    showToast('上传失败', e.response?.data?.detail || '文件上传失败')
+    if (e.response?.status === 400 && typeof e.response?.data?.detail === 'string' && e.response.data.detail.includes('Cannot upload files in phase:')) {
+      showToast('无法上传', '上传仅支持在需求收集阶段；正在生成/已完成时请新建会话再上传。')
+      return
+    }
+    if (e.response?.status === 413) {
+      showToast('上传失败', '文件过大或请求体超限（413）。建议使用更小的文件，或联系我把上传改为分片上传。')
+      return
+    }
+    showToast('上传失败', e.response?.data?.detail || e.message || '文件上传失败')
   } finally {
     isUploading.value = false
   }

@@ -3,14 +3,24 @@ import axios from 'axios'
 export const api = axios.create({
   baseURL: '/api',
   timeout: 60000,
-  headers: {
-    'Content-Type': 'application/json'
-  }
 })
 
 // Request interceptor
 api.interceptors.request.use(
   (config) => {
+    // Let the browser set multipart boundaries automatically for FormData
+    if (typeof FormData !== 'undefined' && config.data instanceof FormData) {
+      if (config.headers) {
+        delete config.headers['Content-Type']
+        delete config.headers['content-type']
+      }
+    } else {
+      // Default JSON content-type for normal requests (avoid forcing it for FormData)
+      if (config.headers && !config.headers['Content-Type'] && !config.headers['content-type']) {
+        config.headers['Content-Type'] = 'application/json'
+      }
+    }
+
     // Add auth token if available
     const token = localStorage.getItem('token')
     if (token) {
