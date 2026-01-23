@@ -1,7 +1,7 @@
 <template>
   <div class="flex flex-col lg:flex-row flex-1 min-h-0 h-full gap-6 lg:gap-5 lg:overflow-hidden">
     <!-- Left Pane: Upload + Skill-Fixer -->
-    <section class="flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
+    <section class="flex flex-col flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
       <header class="px-5 py-4 border-b border-warm-300 bg-gradient-to-b from-warm-100 to-warm-50 flex items-start justify-between gap-4">
         <div class="flex items-start gap-3">
           <div class="w-10 h-10 bg-gradient-to-br from-signal-400 to-signal-600 rounded-xl flex items-center justify-center shrink-0">
@@ -143,17 +143,17 @@
     </section>
 
     <!-- Right Pane: Preview + Actions -->
-    <section class="flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
-      <header class="px-6 py-4 border-b border-warm-300 bg-gradient-to-b from-warm-100 to-warm-50 flex items-center justify-between gap-4">
+    <section class="flex flex-col flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
+      <header class="px-4 py-3 border-b border-warm-300 bg-gradient-to-b from-warm-100 to-warm-50 flex items-center justify-between gap-3">
         <div class="flex items-center gap-3 min-w-0">
-          <div class="w-10 h-10 bg-warm-200 rounded-xl flex items-center justify-center shrink-0">
-            <svg class="w-5 h-5 text-dark-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <div class="w-9 h-9 bg-warm-200 rounded-xl flex items-center justify-center shrink-0">
+            <svg class="w-4.5 h-4.5 text-dark-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
             </svg>
           </div>
           <div class="min-w-0">
-            <p class="font-display font-semibold text-dark-300 truncate">文档预览</p>
-            <p class="text-xs text-dark-50 truncate">{{ skill?.name ? `Skill：${skill.name}` : '正在加载 Skill...' }}</p>
+            <p class="font-display font-semibold text-dark-300 truncate text-sm">文档预览</p>
+            <p class="text-[11px] text-dark-50 truncate">{{ skill?.name ? `Skill：${skill.name}` : '正在加载 Skill...' }}</p>
           </div>
         </div>
 
@@ -162,7 +162,7 @@
             type="button"
             @click="startGeneration"
             :disabled="!canGenerate || isWriting"
-            class="px-3 py-2 text-xs font-semibold rounded-lg bg-anthropic-orange text-white hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-150 flex items-center gap-2 active:scale-[0.98]"
+            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-anthropic-orange text-white hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-150 flex items-center gap-2 active:scale-[0.98]"
             :title="canGenerate ? '开始生成' : '请先上传材料'"
           >
             <svg v-if="!isWriting" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -176,13 +176,13 @@
             v-if="documentContent"
             type="button"
             @click="copyDocument"
-            class="px-3 py-2 text-xs font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors active:scale-[0.98]"
+            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors active:scale-[0.98]"
           >
             {{ copyButtonText }}
           </button>
 
           <div v-if="documentContent" class="relative" ref="exportDropdown">
-            <button type="button" @click="showExportMenu = !showExportMenu" class="px-3 py-2 text-xs font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors flex items-center gap-2 active:scale-[0.98]">
+            <button type="button" @click="showExportMenu = !showExportMenu" class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors flex items-center gap-2 active:scale-[0.98]">
               导出
               <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showExportMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -205,26 +205,26 @@
         </div>
       </header>
 
-      <div v-if="isWriting" class="px-6 py-4 border-b border-warm-300 bg-anthropic-orange/5">
-        <div class="flex items-center gap-3 mb-3">
-          <div class="w-5 h-5 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner"></div>
-          <span class="font-medium text-dark-300">正在生成文档...</span>
+      <div v-if="isWriting" class="px-4 py-3 border-b border-warm-300 bg-anthropic-orange/5">
+        <div class="flex items-center gap-2 mb-2">
+          <div class="w-4 h-4 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner"></div>
+          <span class="font-medium text-dark-300 text-sm">正在生成...</span>
         </div>
         <div v-if="writingProgress.total > 0">
-          <div class="flex justify-between mb-2 text-sm text-dark-50">
+          <div class="flex justify-between mb-2 text-xs text-dark-50">
             <span class="truncate">{{ currentSection || '处理中...' }}</span>
             <span class="shrink-0">{{ writingProgress.current }} / {{ writingProgress.total }}</span>
           </div>
           <div class="w-full bg-warm-200 rounded-full h-2 overflow-hidden">
             <div class="bg-gradient-to-r from-anthropic-orange to-anthropic-orange-dark h-2 rounded-full progress-bar" :style="{ width: progressPercent + '%' }"></div>
           </div>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <span v-for="stage in stageOrder" :key="stage" class="px-2.5 py-1 text-xs rounded-full border transition-colors" :class="stageBadgeClass(stageState[stage])">
+          <div class="mt-2 flex flex-wrap gap-2">
+            <span v-for="stage in stageOrder" :key="stage" class="px-2 py-0.5 text-[11px] rounded-full border transition-colors" :class="stageBadgeClass(stageState[stage])">
               {{ stageLabels[stage] }}
             </span>
           </div>
-          <p v-if="currentStageLabel" class="mt-2 text-xs text-dark-50">当前阶段：{{ currentStageLabel }}</p>
-          <p v-if="reviewSnapshot" class="mt-1 text-xs" :class="reviewSnapshot.passed ? 'text-green-300' : 'text-amber-300'">
+          <p v-if="currentStageLabel" class="mt-2 text-[11px] text-dark-50">当前阶段：{{ currentStageLabel }}</p>
+          <p v-if="reviewSnapshot" class="mt-1 text-[11px]" :class="reviewSnapshot.passed ? 'text-green-300' : 'text-amber-300'">
             评审分数：{{ reviewSnapshot.score ?? '-' }} · {{ reviewSnapshot.passed ? '通过' : '需要修订' }}
           </p>
         </div>

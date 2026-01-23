@@ -30,6 +30,16 @@ body {
   overflow-y: scroll;
 }
 
+@media (min-width: 1024px) {
+  body.route-write {
+    overflow: hidden;
+  }
+
+  html.route-write {
+    overflow: hidden;
+  }
+}
+
 .app-shell {
   background:
     radial-gradient(900px circle at 12% -10%, rgba(255, 255, 255, 0.04), transparent 58%),

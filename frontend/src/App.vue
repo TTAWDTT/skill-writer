@@ -1,6 +1,9 @@
 <template>
-  <div class="app-shell min-h-screen text-dark-300">
-    <div class="flex min-h-screen flex-col">
+  <div
+    class="app-shell text-dark-300 min-h-screen"
+    :class="isWideLayout ? 'lg:h-screen lg:overflow-hidden' : ''"
+  >
+    <div class="flex flex-col min-h-screen" :class="isWideLayout ? 'lg:h-full' : ''">
       <!-- Header -->
       <header class="border-b border-white/10 bg-warm-50/60 backdrop-blur supports-[backdrop-filter]:bg-warm-50/40">
         <div class="max-w-6xl mx-auto px-6 py-4 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -52,10 +55,10 @@
       <main
         class="mx-auto px-6 flex-1 min-h-0 flex flex-col"
         :class="[
-          isWideLayout ? 'max-w-none w-full py-6' : 'max-w-6xl py-10'
+          isWideLayout ? 'max-w-none w-full py-6 lg:overflow-hidden' : 'max-w-6xl py-10'
         ]"
       >
-        <div class="flex flex-col flex-1 min-h-0">
+        <div class="flex flex-col flex-1 min-h-0" :class="isWideLayout ? 'lg:overflow-hidden' : ''">
           <router-view />
         </div>
       </main>
@@ -71,9 +74,15 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 
 const route = useRoute()
 const isWideLayout = computed(() => route.path.startsWith('/write'))
+
+watchEffect(() => {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle('route-write', isWideLayout.value)
+  document.documentElement.classList.toggle('route-write', isWideLayout.value)
+})
 </script>
