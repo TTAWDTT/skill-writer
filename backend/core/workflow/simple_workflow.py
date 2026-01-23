@@ -13,6 +13,7 @@ from backend.core.skills.overlay import apply_skill_overlay
 from backend.core.agents.requirement_agent import RequirementAgent, RequirementState
 from backend.core.agents.writer_agent import WriterAgent, WritingState
 from backend.core.agents.reviewer_agent import ReviewerAgent
+from backend.core.agents.format_refiner_agent import FormatRefinerAgent
 
 # 从独立模块导入 SessionState 避免循环依赖
 from backend.core.workflow.state import SessionState
@@ -55,6 +56,7 @@ class SimpleWorkflow:
         self.requirement_agent = RequirementAgent()
         self.writer_agent = WriterAgent()
         self.reviewer_agent = ReviewerAgent()
+        self.format_refiner_agent = FormatRefinerAgent()
         self.store = store or _get_database_store()
 
     def create_session(self, skill_id: str) -> SessionState:
@@ -249,7 +251,9 @@ class SimpleWorkflow:
 
             combined = "\n\n".join(contents)
             session.writing_state = asdict(state)
-            session.final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
+            final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
+            refined = self.format_refiner_agent.run(final_document, skill_name=skill.metadata.name)
+            session.final_document = refined.content
             session.phase = "complete"
             self.store.save(session)
 
@@ -449,7 +453,9 @@ class SimpleWorkflow:
 
             # 组装最终文档
             combined = "\n\n".join(all_content)
-            session.final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
+            final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
+            refined = self.format_refiner_agent.run(final_document, skill_name=skill.metadata.name)
+            session.final_document = refined.content
             session.phase = "complete"
             self.store.save(session)
 
