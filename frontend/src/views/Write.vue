@@ -233,9 +233,14 @@
       <div v-else-if="isPostProcessing" class="px-4 py-3 border-b border-warm-300 bg-warm-100/60">
         <div class="flex items-center gap-2">
           <div class="w-4 h-4 border-2 border-warm-300 border-t-anthropic-orange rounded-full spinner"></div>
-          <span class="font-medium text-dark-300 text-sm">正在进行{{ postProcessLabel || '润色以及格式调整' }}...</span>
+          <span class="font-medium text-dark-300 text-sm">Document-Refiner 正在进行{{ postProcessLabel || '润色以及格式调整' }}...</span>
         </div>
-        <p class="text-[11px] text-dark-50 mt-1">这一步会对“展示形式”进行优化，不改变事实内容。</p>
+        <p class="text-[11px] text-dark-50 mt-1">
+          自动执行：去重（信息层面，非语义）→ 标题/字段格式整理 → 清理无关输出。仅优化展示，不新增/篡改事实。
+        </p>
+      </div>
+      <div v-else-if="postProcessToast" class="px-4 py-2 border-b border-warm-300 bg-black/20">
+        <p class="text-[11px] text-dark-50">{{ postProcessToast }}</p>
       </div>
 
       <div class="flex-1 min-h-0 overflow-y-auto p-6">
@@ -298,6 +303,8 @@ const stageState = reactive({
 const reviewSnapshot = ref(null)
 const isPostProcessing = ref(false)
 const postProcessLabel = ref('')
+const postProcessMeta = ref(null)
+const postProcessToast = ref('')
 
 // Session augmentation
 const externalInformation = ref('')
@@ -580,11 +587,24 @@ const startStreamGeneration = async () => {
         case 'postprocess_start':
           isPostProcessing.value = true
           postProcessLabel.value = data.name || '润色以及格式调整'
+          postProcessMeta.value = null
+          postProcessToast.value = ''
           break
 
         case 'postprocess_complete':
           isPostProcessing.value = false
           postProcessLabel.value = ''
+          postProcessMeta.value = data.meta || null
+          if (postProcessMeta.value && typeof postProcessMeta.value === 'object') {
+            const preRemoved = postProcessMeta.value?.dedupe_pre?.removed
+            const postRemoved = postProcessMeta.value?.dedupe_post?.removed
+            const pieces = []
+            if (typeof preRemoved === 'number') pieces.push(`预去重移除 ${preRemoved} 块`)
+            if (typeof postRemoved === 'number') pieces.push(`后去重移除 ${postRemoved} 块`)
+            const reason = postProcessMeta.value?.reason
+            if (reason) pieces.push(`结果：${reason}`)
+            postProcessToast.value = pieces.join(' · ')
+          }
           break
       }
     }

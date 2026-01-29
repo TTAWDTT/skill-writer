@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SkillWriter - Skill 到文档生成流程图</title>
+    <style>
+      :root{
+        --bg0:#070a0f;
+        --bg1:#0b1220;
+        --card:#0d1626;
+        --border:rgba(255,255,255,.08);
+        --text:#e7eefc;
+        --muted:rgba(231,238,252,.70);
+        --muted2:rgba(231,238,252,.55);
+        --accent:#2fe6a8;
+        --accent2:#49a9ff;
+        --warn:#ffcc66;
+        --shadow:0 30px 80px rgba(0,0,0,.55);
+        --radius:18px;
+        --mono:ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+        --sans:ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Noto Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+      }
+      *{box-sizing:border-box}
+      html,body{height:100%}
+      body{
+        margin:0;
+        font-family:var(--sans);
+        color:var(--text);
+        background:
+          radial-gradient(900px 420px at 20% 10%, rgba(47,230,168,.16), transparent 55%),
+          radial-gradient(760px 380px at 85% 20%, rgba(73,169,255,.14), transparent 55%),
+          radial-gradient(700px 420px at 55% 95%, rgba(255,204,102,.10), transparent 60%),
+          linear-gradient(180deg, var(--bg0), var(--bg1));
+      }
+      .wrap{
+        max-width:1200px;
+        margin:0 auto;
+        padding:28px 18px 40px;
+      }
+      header{
+        display:flex;
+        align-items:flex-end;
+        justify-content:space-between;
+        gap:16px;
+        margin-bottom:14px;
+      }
+      .title{
+        display:flex;
+        flex-direction:column;
+        gap:6px;
+      }
+      .title h1{
+        margin:0;
+        font-size:22px;
+        letter-spacing:.2px;
+      }
+      .title p{
+        margin:0;
+        color:var(--muted);
+        line-height:1.4;
+        font-size:13px;
+      }
+      .badge{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:8px 10px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:rgba(13,22,38,.55);
+        box-shadow:var(--shadow);
+        color:var(--muted);
+        font-size:12px;
+        white-space:nowrap;
+      }
+      .dot{
+        width:9px;height:9px;border-radius:50%;
+        background:var(--accent);
+        box-shadow:0 0 0 4px rgba(47,230,168,.14);
+      }
+      .grid{
+        display:grid;
+        grid-template-columns: 1.8fr 1fr;
+        gap:14px;
+      }
+      .card{
+        border:1px solid var(--border);
+        background:linear-gradient(180deg, rgba(13,22,38,.78), rgba(13,22,38,.58));
+        border-radius:var(--radius);
+        box-shadow:var(--shadow);
+        overflow:hidden;
+      }
+      .card .hd{
+        padding:12px 14px;
+        border-bottom:1px solid var(--border);
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:12px;
+      }
+      .card .hd strong{font-size:13px}
+      .card .hd span{font-size:12px;color:var(--muted2)}
+      .card .bd{padding:12px 14px}
+      .legend{
+        display:flex;
+        flex-wrap:wrap;
+        gap:8px;
+      }
+      .pill{
+        display:inline-flex;
+        align-items:center;
+        gap:8px;
+        padding:7px 10px;
+        border-radius:999px;
+        border:1px solid var(--border);
+        background:rgba(0,0,0,.12);
+        font-size:12px;
+        color:var(--muted);
+      }
+      .pill i{width:10px;height:10px;border-radius:3px;display:inline-block}
+      .pill .a{background:rgba(47,230,168,.85)}
+      .pill .b{background:rgba(73,169,255,.85)}
+      .pill .c{background:rgba(255,204,102,.92)}
+      .pill .d{background:rgba(255,255,255,.42)}
+      details{
+        border:1px solid var(--border);
+        border-radius:14px;
+        padding:10px 12px;
+        background:rgba(0,0,0,.10);
+      }
+      details + details{margin-top:10px}
+      summary{
+        cursor:pointer;
+        user-select:none;
+        font-size:13px;
+        color:var(--text);
+        list-style:none;
+        display:flex;
+        align-items:center;
+        justify-content:space-between;
+        gap:10px;
+      }
+      summary::-webkit-details-marker{display:none}
+      .k{font-family:var(--mono);font-size:12px;color:var(--muted)}
+      .p{
+        margin:8px 0 0;
+        color:var(--muted);
+        line-height:1.55;
+        font-size:12.5px;
+      }
+      .p code{
+        font-family:var(--mono);
+        font-size:12px;
+        padding:1px 5px;
+        border:1px solid var(--border);
+        border-radius:8px;
+        background:rgba(0,0,0,.18);
+        color:var(--text);
+      }
+      .foot{
+        margin-top:14px;
+        color:rgba(231,238,252,.52);
+        font-size:12px;
+        text-align:right;
+      }
+
+      /* SVG */
+      svg{display:block;width:100%;height:auto}
+      .node{
+        fill:rgba(10,16,28,.72);
+        stroke:rgba(255,255,255,.12);
+        stroke-width:1;
+      }
+      .nodeAccent{stroke:rgba(47,230,168,.55)}
+      .nodeBlue{stroke:rgba(73,169,255,.55)}
+      .nodeWarn{stroke:rgba(255,204,102,.60)}
+      .nodeTitle{fill:var(--text);font-size:12.5px;font-weight:650}
+      .nodeSub{fill:rgba(231,238,252,.70);font-size:11.5px}
+      .tag{
+        font-family:var(--mono);
+        fill:rgba(231,238,252,.55);
+        font-size:10.5px;
+      }
+      .arrow{
+        stroke:rgba(231,238,252,.55);
+        stroke-width:1.4;
+        fill:none;
+        stroke-linecap:round;
+        stroke-dasharray:6 6;
+        animation:dash 10s linear infinite;
+      }
+      .arrowAccent{stroke:rgba(47,230,168,.65)}
+      .arrowBlue{stroke:rgba(73,169,255,.65)}
+      .arrowWarn{stroke:rgba(255,204,102,.70)}
+      @keyframes dash{
+        0%{stroke-dashoffset:0}
+        100%{stroke-dashoffset:-120}
+      }
+
+      @media (max-width: 980px){
+        .grid{grid-template-columns:1fr}
+        header{align-items:flex-start;flex-direction:column}
+        .badge{align-self:flex-start}
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <div class="title">
+          <h1>SkillWriter</h1>
+          <p>从“创建/演化 Skill”到“材料解析、写作、多 Agent 后处理、最终文档”的直观流程图（中文说明，项目名保持英文）。</p>
+        </div>
+        <div class="badge"><span class="dot"></span>可读版流程图（HTML 单文件）</div>
+      </header>
+
+      <div class="grid">
+        <section class="card">
+          <div class="hd">
+            <strong>总流程</strong>
+            <span>创建 Skill → 上传材料 → 生成 → 去重润色 → 预览/导出</span>
+          </div>
+          <div class="bd">
+            <svg viewBox="0 0 1040 640" role="img" aria-label="SkillWriter 流程图">
+              <defs>
+                <linearGradient id="g" x1="0" x2="1">
+                  <stop offset="0" stop-color="rgba(47,230,168,.18)"/>
+                  <stop offset="1" stop-color="rgba(73,169,255,.14)"/>
+                </linearGradient>
+                <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+                  <feGaussianBlur stdDeviation="10" result="b"/>
+                  <feMerge>
+                    <feMergeNode in="b"/>
+                    <feMergeNode in="SourceGraphic"/>
+                  </feMerge>
+                </filter>
+                <marker id="m" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto">
+                  <path d="M0,0 L10,5 L0,10 z" fill="rgba(231,238,252,.65)"/>
+                </marker>
+              </defs>
+
+              <!-- Background panel -->
+              <rect x="18" y="16" width="1004" height="608" rx="22" fill="url(#g)" opacity=".22"/>
+
+              <!-- Lane titles -->
+              <text x="54" y="70" class="tag">前端 (Web)</text>
+              <text x="54" y="290" class="tag">后端 (API + 工作流)</text>
+              <text x="54" y="518" class="tag">LLM / Providers</text>
+
+              <!-- Nodes: Frontend -->
+              <rect x="54" y="92" width="300" height="92" rx="16" class="node nodeBlue"/>
+              <text x="74" y="122" class="nodeTitle">1. 创建/选择 Skill</text>
+              <text x="74" y="146" class="nodeSub">读取 <tspan class="k">SKILL.md</tspan> + requirements</text>
+              <text x="74" y="168" class="nodeSub">（决定 agent 链路与输出结构）</text>
+
+              <rect x="54" y="196" width="300" height="92" rx="16" class="node"/>
+              <text x="74" y="226" class="nodeTitle">2. 上传材料（多文件）</text>
+              <text x="74" y="250" class="nodeSub">pdf / pptx / docx / txt ...</text>
+              <text x="74" y="272" class="nodeSub">展示 Skill-Fixer 的处理提示</text>
+
+              <rect x="390" y="144" width="260" height="144" rx="16" class="node nodeAccent" filter="url(#glow)"/>
+              <text x="410" y="176" class="nodeTitle">3. Write：生成文档</text>
+              <text x="410" y="200" class="nodeSub">固定双栏组件</text>
+              <text x="410" y="222" class="nodeSub">组件内滚动（页面不变长）</text>
+              <text x="410" y="244" class="nodeSub">显示“润色与格式调整中”</text>
+              <text x="410" y="266" class="nodeSub">预览/复制/导出</text>
+
+              <!-- Nodes: Backend -->
+              <rect x="54" y="316" width="300" height="110" rx="16" class="node nodeBlue"/>
+              <text x="74" y="348" class="nodeTitle">4. Upload API</text>
+              <text x="74" y="372" class="nodeSub">保存文件 + 提取纯文本</text>
+              <text x="74" y="394" class="nodeSub">进入“信息处理层”</text>
+              <text x="74" y="416" class="nodeSub">错误：返回 warning，但不中断</text>
+
+              <rect x="390" y="316" width="300" height="110" rx="16" class="node"/>
+              <text x="410" y="348" class="nodeTitle">5. Skill-Fixer（信息处理层）</text>
+              <text x="410" y="372" class="nodeSub">把“材料文本”补齐成可写作结构</text>
+              <text x="410" y="394" class="nodeSub">（尽量修复缺字段、缺上下文）</text>
+              <text x="410" y="416" class="nodeSub">输出：Normalized JSON + notes</text>
+
+              <rect x="726" y="316" width="260" height="110" rx="16" class="node nodeAccent"/>
+              <text x="746" y="348" class="nodeTitle">6. Writer Agent</text>
+              <text x="746" y="372" class="nodeSub">分段生成（SSE streaming）</text>
+              <text x="746" y="394" class="nodeSub">严格遵循 skill 约束</text>
+              <text x="746" y="416" class="nodeSub">得到整篇 Markdown</text>
+
+              <rect x="726" y="442" width="260" height="110" rx="16" class="node nodeWarn"/>
+              <text x="746" y="474" class="nodeTitle">7. Document-Refiner</text>
+              <text x="746" y="498" class="nodeSub">去重（确定性，非语义）</text>
+              <text x="746" y="520" class="nodeSub">润色与格式调整（LLM）</text>
+              <text x="746" y="542" class="nodeSub">输出：最终 Markdown</text>
+
+              <!-- Nodes: Providers -->
+              <rect x="54" y="544" width="300" height="78" rx="16" class="node"/>
+              <text x="74" y="574" class="nodeTitle">8. LLM Providers</text>
+              <text x="74" y="598" class="nodeSub">DeepSeek / Gemini / OpenAI-compatible ...</text>
+
+              <!-- Arrows -->
+              <path class="arrow arrowBlue" marker-end="url(#m)" d="M204,184 C204,190 204,190 204,196"/>
+              <path class="arrow" marker-end="url(#m)" d="M354,242 C372,242 372,242 390,242"/>
+              <path class="arrow arrowBlue" marker-end="url(#m)" d="M204,288 C204,302 204,302 204,316"/>
+              <path class="arrow" marker-end="url(#m)" d="M354,372 C372,372 372,372 390,372"/>
+              <path class="arrow arrowAccent" marker-end="url(#m)" d="M690,372 C708,372 708,372 726,372"/>
+              <path class="arrow arrowWarn" marker-end="url(#m)" d="M856,426 C856,434 856,434 856,442"/>
+              <path class="arrow" marker-end="url(#m)" d="M204,426 C204,488 204,488 204,544"/>
+              <path class="arrow" marker-end="url(#m)" d="M826,552 C720,592 520,592 354,592"/>
+            </svg>
+          </div>
+        </section>
+
+        <aside class="card">
+          <div class="hd">
+            <strong>关键点（看这里就够）</strong>
+            <span>按你现在的架构口径</span>
+          </div>
+          <div class="bd">
+            <div class="legend" style="margin-bottom:10px">
+              <span class="pill"><i class="a"></i>主路径</span>
+              <span class="pill"><i class="b"></i>配置/接入</span>
+              <span class="pill"><i class="c"></i>后处理</span>
+              <span class="pill"><i class="d"></i>可选/兜底</span>
+            </div>
+
+            <details open>
+              <summary>Skill 的“演变”如何影响最终文档？<span class="k">SKILL.md</span></summary>
+              <p class="p">Skill 本质是一组本地指令（例如写作结构、字段约束、输出风格、agent 组合），后端根据 skill 决定 writer 的生成逻辑；前端只负责“选择/展示”。</p>
+            </details>
+
+            <details open>
+              <summary>Skill-Fixer 为什么重要？<span class="k">信息处理层</span></summary>
+              <p class="p">它把上传材料解析出的“碎文本”整理成可写作的数据结构（如：研究背景/目标/路线/创新/风险/预算等），并尽量修复缺失信息。它做的是“信息工程”，而不是写作本身。</p>
+            </details>
+
+            <details open>
+              <summary>Document-Refiner 做什么？<span class="k">去重 + 润色</span></summary>
+              <p class="p"><b>去重</b>：在调用 LLM 前后，都先做一次确定性去重（完全相同的段落/条目重复会被移除）。<br/>
+                <b>润色</b>：把“字段：值”的表单感改成自然文书结构，并把“文书标题：XXX”变为首行 <code># XXX</code>。</p>
+            </details>
+
+            <details>
+              <summary>什么时候会“看起来没变化”？<span class="k">UI</span></summary>
+              <p class="p">通常是：后端已返回 200，但前端未消费到 streaming 事件/状态未落库。现在推荐用固定大小组件 + 组件内滚动，避免“内容变长导致布局抖动”。</p>
+            </details>
+
+            <div class="foot">designed by TTAWDTT</div>
+          </div>
+        </aside>
+      </div>
+    </div>
+  </body>
+</html>
+

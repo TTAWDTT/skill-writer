@@ -252,7 +252,9 @@ class SimpleWorkflow:
             combined = "\n\n".join(contents)
             session.writing_state = asdict(state)
             final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
-            session.final_document = await self._polish_document(final_document, skill.metadata.name)
+            polished, meta = await self._polish_document(final_document, skill.metadata.name)
+            session.final_document = polished
+            session.postprocess_meta = meta  # type: ignore[attr-defined]
             session.phase = "complete"
             self.store.save(session)
 
@@ -455,8 +457,10 @@ class SimpleWorkflow:
             final_document = self.writer_agent._dedupe_adjacent_heading_lines(combined)
 
             yield {"type": "postprocess_start", "name": "润色以及格式调整"}
-            session.final_document = await self._polish_document(final_document, skill.metadata.name)
-            yield {"type": "postprocess_complete", "name": "润色以及格式调整"}
+            polished, meta = await self._polish_document(final_document, skill.metadata.name)
+            session.final_document = polished
+            session.postprocess_meta = meta  # type: ignore[attr-defined]
+            yield {"type": "postprocess_complete", "name": "润色以及格式调整", "meta": meta}
 
             session.phase = "complete"
             self.store.save(session)
@@ -488,7 +492,7 @@ class SimpleWorkflow:
 5. 符合学术规范
 """
 
-    async def _polish_document(self, markdown: str, skill_name: str) -> str:
+    async def _polish_document(self, markdown: str, skill_name: str) -> tuple[str, dict]:
         """
         LLM-based post-processing for presentation.
         If polishing fails, fall back to the original markdown.
@@ -499,11 +503,12 @@ class SimpleWorkflow:
                 skill_name=skill_name,
             )
             content = (result or {}).get("content") or ""
+            meta = {k: v for k, v in (result or {}).items() if k != "content"}
             if not content.strip():
-                return markdown.strip() + "\n"
-            return content.strip() + "\n"
+                return markdown.strip() + "\n", {"changed": False, "reason": "empty_output"}
+            return content.strip() + "\n", meta
         except Exception:
-            return markdown.strip() + "\n"
+            return markdown.strip() + "\n", {"changed": False, "reason": "exception"}
 
 
 # 全局工作流实例
