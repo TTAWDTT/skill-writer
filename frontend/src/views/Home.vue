@@ -351,7 +351,7 @@ const deleting = ref(false)
 
 // Filter out the skill creator from the list (it's a system tool, not a writing skill)
 const skills = computed(() => {
-  return allSkills.value.filter(skill => skill.id !== 'writer-skill-creator')
+  return allSkills.value.filter(skill => !['writer-skill-creator', 'base_writing'].includes(skill.id))
 })
 
 const fetchSkills = async () => {

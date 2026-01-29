@@ -23,6 +23,8 @@ async def list_skills():
     registry = get_registry()
     skills = registry.get_all()
 
+    hidden_skills = {"writer-skill-creator", "writer_skill_creator", "base_writing"}
+
     return [
         {
             "id": skill.metadata.id,
@@ -32,6 +34,7 @@ async def list_skills():
             "tags": skill.metadata.tags,
         }
         for skill in skills
+        if skill.metadata.id not in hidden_skills
     ]
 
 
@@ -291,7 +294,7 @@ async def delete_skill(skill_id: str):
     注意：此操作不可逆，会删除 Skill 的所有文件
     """
     # 防止删除系统内置 Skill
-    protected_skills = {'writer-skill-creator', 'writer_skill_creator'}
+    protected_skills = {'writer-skill-creator', 'writer_skill_creator', 'base_writing'}
     if skill_id in protected_skills:
         raise HTTPException(
             status_code=403,

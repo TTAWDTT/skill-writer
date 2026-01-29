@@ -142,6 +142,8 @@ class BaseSkill(ABC):
             f"- {k}: {v}" for k, v in requirements.items() if v
         ) or "（暂无）"
 
+        criteria_text = (self.evaluation_criteria or "").strip() or "无"
+
         return f"""请审核以下章节内容，检查格式、事实一致性与必填信息覆盖情况。
 
 ## 章节
@@ -149,6 +151,9 @@ class BaseSkill(ABC):
 
 ## 评审要点
 {points_text}
+
+## 全局评审标准
+{criteria_text}
 
 ## 已知需求
 {requirements_text}
