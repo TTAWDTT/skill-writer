@@ -135,6 +135,253 @@
           </div>
         </div>
 
+        <!-- Planner Blueprint (default visible) -->
+        <div class="rounded-2xl border border-warm-300 bg-warm-100/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-dark-300">全局蓝图（Planner）</p>
+              <p class="text-xs text-dark-50 mt-1">
+                先规划全文主线与各章目标，再进入逐章写作，减少前后不一致与返工。
+              </p>
+            </div>
+            <div class="flex items-center gap-2 shrink-0">
+              <span
+                class="text-xs px-2 py-0.5 rounded-full border"
+                :class="plannerPlan ? 'bg-green-900/30 text-green-300 border-green-500/40' : (stageState.plan === 'active' ? 'bg-anthropic-orange/10 text-anthropic-orange-dark border-anthropic-orange/40' : 'bg-warm-200 text-dark-100 border-warm-300')"
+              >
+                {{ plannerPlan ? '已生成' : (stageState.plan === 'active' ? '生成中' : '未生成') }}
+              </span>
+              <button
+                type="button"
+                class="px-2 py-1 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors"
+                @click="plannerVisible = !plannerVisible"
+              >
+                {{ plannerVisible ? '收起' : '展开' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="plannerVisible" class="mt-4 space-y-3">
+            <div class="flex flex-wrap gap-2">
+              <button
+                type="button"
+                class="px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors"
+                :class="plannerTab === 'outline' ? 'border-anthropic-orange bg-anthropic-orange/10 text-anthropic-orange-dark' : 'border-warm-300 bg-warm-50 text-dark-50 hover:bg-warm-100'"
+                @click="plannerTab = 'outline'"
+              >
+                主线与结构
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors"
+                :class="plannerTab === 'section' ? 'border-anthropic-orange bg-anthropic-orange/10 text-anthropic-orange-dark' : 'border-warm-300 bg-warm-50 text-dark-50 hover:bg-warm-100'"
+                @click="plannerTab = 'section'"
+              >
+                当前章节计划
+              </button>
+              <button
+                type="button"
+                class="px-2.5 py-1 text-[11px] font-semibold rounded-lg border transition-colors"
+                :class="plannerTab === 'terms' ? 'border-anthropic-orange bg-anthropic-orange/10 text-anthropic-orange-dark' : 'border-warm-300 bg-warm-50 text-dark-50 hover:bg-warm-100'"
+                @click="plannerTab = 'terms'"
+              >
+                术语与风险
+              </button>
+            </div>
+
+            <div v-if="!plannerPlan" class="text-xs text-dark-50">
+              点击右侧“生成文档”后会先生成蓝图，然后逐章写作。蓝图会在这里实时展示。
+            </div>
+
+            <template v-else>
+              <div v-if="plannerTab === 'outline'" class="space-y-3">
+                <div class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                  <p class="text-xs font-medium text-dark-100">全文主线</p>
+                  <p class="text-xs text-dark-50 mt-2 whitespace-pre-wrap">{{ plannerPlan.global_thesis || '（无）' }}</p>
+                </div>
+
+                <div class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                  <p class="text-xs font-medium text-dark-100">全文蓝图（结构/论证链）</p>
+                  <pre class="text-[11px] text-dark-50 mt-2 whitespace-pre-wrap font-mono leading-relaxed">{{ plannerPlan.global_outline || '（无）' }}</pre>
+                </div>
+              </div>
+
+              <div v-else-if="plannerTab === 'section'" class="space-y-3">
+                <div class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                  <div class="flex items-center justify-between gap-3">
+                    <p class="text-xs font-medium text-dark-100">当前章节</p>
+                    <span class="text-[11px] text-dark-50 truncate">{{ currentSection || '（等待章节开始）' }}</span>
+                  </div>
+                  <div v-if="!plannerCurrentGuidance" class="text-xs text-dark-50 mt-2">
+                    暂无本章计划（可能还未进入章节写作）。
+                  </div>
+                  <div v-else class="mt-3 space-y-2">
+                    <div v-if="plannerCurrentGuidance.objective" class="text-xs text-dark-50 whitespace-pre-wrap">
+                      <span class="text-dark-100 font-medium">目的：</span>{{ plannerCurrentGuidance.objective }}
+                    </div>
+
+                    <div v-if="plannerCurrentGuidance.key_points?.length" class="text-xs text-dark-50">
+                      <p class="text-dark-100 font-medium mb-1">关键要点</p>
+                      <ul class="list-disc pl-4 space-y-1">
+                        <li v-for="(p, idx) in plannerCurrentGuidance.key_points" :key="`kp-${idx}`">{{ p }}</li>
+                      </ul>
+                    </div>
+
+                    <div v-if="plannerCurrentGuidance.must_mention?.length" class="text-xs text-dark-50">
+                      <p class="text-dark-100 font-medium mb-1">必须提及</p>
+                      <div class="flex flex-wrap gap-2">
+                        <span v-for="(p, idx) in plannerCurrentGuidance.must_mention" :key="`mm-${idx}`" class="text-[11px] bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full">
+                          {{ p }}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div v-if="plannerCurrentGuidance.avoid?.length" class="text-xs text-dark-50">
+                      <p class="text-dark-100 font-medium mb-1">避免</p>
+                      <ul class="list-disc pl-4 space-y-1">
+                        <li v-for="(p, idx) in plannerCurrentGuidance.avoid" :key="`av-${idx}`">{{ p }}</li>
+                      </ul>
+                    </div>
+
+                    <div v-if="plannerCurrentGuidance.cross_refs?.length" class="text-xs text-dark-50">
+                      <p class="text-dark-100 font-medium mb-1">承接/引用</p>
+                      <div class="flex flex-wrap gap-2">
+                        <span v-for="(p, idx) in plannerCurrentGuidance.cross_refs" :key="`cr-${idx}`" class="text-[11px] bg-signal-100 text-signal-700 px-2 py-0.5 rounded-full">
+                          {{ sectionTitleMap[p] || p }}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div v-else class="space-y-3">
+                <div v-if="plannerPlan.terminology?.length" class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                  <p class="text-xs font-medium text-dark-100">术语约定</p>
+                  <div class="mt-2 space-y-2">
+                    <div v-for="(item, idx) in plannerPlan.terminology" :key="`term-${idx}`" class="text-xs text-dark-50">
+                      <span class="text-dark-100 font-medium">{{ item.term }}：</span>
+                      <span class="whitespace-pre-wrap">{{ item.definition }}</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div v-if="plannerPlan.risks?.length" class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                  <p class="text-xs font-medium text-dark-100">风险/缺口提示</p>
+                  <ul class="text-xs text-dark-50 mt-2 list-disc pl-4 space-y-1">
+                    <li v-for="(r, idx) in plannerPlan.risks" :key="`risk-${idx}`">{{ r }}</li>
+                  </ul>
+                </div>
+
+                <div v-if="!plannerPlan.terminology?.length && !plannerPlan.risks?.length" class="text-xs text-dark-50">
+                  （无术语约定 / 风险提示）
+                </div>
+              </div>
+            </template>
+          </div>
+        </div>
+
+        <!-- Web Search -->
+        <div class="rounded-2xl border border-warm-300 bg-warm-100/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-dark-300">Web 搜索（补充外部信息）</p>
+              <p class="text-xs text-dark-50 mt-1">检索结果会追加到本会话“补充信息摘要”，用于写作参考。</p>
+            </div>
+          </div>
+
+          <div class="mt-3 flex gap-2">
+            <input
+              v-model="searchQuery"
+              type="text"
+              class="flex-1 px-3 py-2 rounded-xl bg-warm-50 border border-warm-300 text-sm text-dark-300 placeholder:text-dark-50 focus:outline-none focus:ring-2 focus:ring-anthropic-orange/40"
+              placeholder="例如：NSFC 面上项目 立项依据 常见评审关注点"
+              :disabled="!sessionId || searching"
+              @keydown.enter.prevent="runSearch"
+            />
+            <button
+              type="button"
+              class="px-4 py-2 rounded-xl text-sm font-semibold transition-colors"
+              :class="(!sessionId || searching || !searchQuery.trim()) ? 'bg-warm-300 text-warm-500 cursor-not-allowed' : 'bg-anthropic-orange text-white hover:bg-anthropic-orange-dark'"
+              :disabled="!sessionId || searching || !searchQuery.trim()"
+              @click="runSearch"
+            >
+              {{ searching ? '搜索中...' : '搜索' }}
+            </button>
+          </div>
+
+          <div v-if="searchResults.length" class="mt-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <p class="text-xs font-medium text-dark-50">最近结果</p>
+              <button type="button" class="text-xs text-dark-100 hover:text-anthropic-orange" @click="searchResults = []">
+                清空
+              </button>
+            </div>
+            <div class="space-y-2 max-h-48 overflow-y-auto pr-1">
+              <div v-for="(r, idx) in searchResults" :key="`sr-${idx}`" class="rounded-xl border border-warm-300 bg-warm-50/70 p-3">
+                <p class="text-xs font-semibold text-dark-300">{{ r.title }}</p>
+                <p v-if="r.snippet" class="text-xs text-dark-50 mt-1">{{ r.snippet }}</p>
+                <a v-if="r.url" class="text-xs text-anthropic-orange hover:underline mt-2 inline-block break-all" :href="r.url" target="_blank" rel="noreferrer">
+                  {{ r.url }}
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Saved diagrams (downloadable) -->
+        <div class="rounded-2xl border border-warm-300 bg-warm-100/80 p-4">
+          <div class="flex items-start justify-between gap-3">
+            <div>
+              <p class="text-sm font-semibold text-dark-300">已生成图示（下载 PNG/SVG）</p>
+              <p class="text-xs text-dark-50 mt-1">PNG 可直接插入文档；信息图模式提供 SVG（可编辑）。</p>
+            </div>
+            <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full border border-warm-300">
+              {{ sessionDiagrams.length }} 个
+            </span>
+          </div>
+
+          <div v-if="sessionDiagrams.length === 0" class="text-xs text-dark-50 mt-3">
+            生成图示后，这里会出现可下载版本（PNG/SVG）。
+          </div>
+          <div v-else class="mt-3 space-y-2">
+            <div
+              v-for="d in sessionDiagrams"
+              :key="d.id"
+              class="rounded-xl border border-warm-300 bg-warm-50/70 p-3 flex items-center justify-between gap-3"
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-medium text-dark-300 truncate">{{ d.title }}</p>
+                <p class="text-[11px] text-dark-50 mt-1">
+                  {{ d.diagram_type }} · {{ d.mode || 'infographic' }} · {{ d.created_at || '-' }}
+                </p>
+              </div>
+              <div class="shrink-0 flex items-center gap-2">
+                <a
+                  v-if="d.has_png !== false"
+                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors"
+                  :href="d.png_url || `/api/chat/session/${sessionId}/diagrams/${d.id}.png`"
+                  target="_blank"
+                  rel="noreferrer"
+                  :download="`${d.title || 'diagram'}.png`"
+                >
+                  下载 PNG
+                </a>
+                <a
+                  v-if="d.has_svg"
+                  class="px-3 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors"
+                  :href="d.svg_url || `/api/chat/session/${sessionId}/diagrams/${d.id}.svg`"
+                  target="_blank"
+                  rel="noreferrer"
+                  :download="`${d.title || 'diagram'}.svg`"
+                >
+                  下载 SVG
+                </a>
+              </div>
+            </div>
+          </div>
+        </div>
+
         <details v-if="externalInformation" class="rounded-2xl border border-warm-300 bg-warm-100/80 p-4 hover:bg-warm-100 transition-colors">
           <summary class="text-sm font-semibold text-dark-300 cursor-pointer">补充信息摘要</summary>
           <p class="text-xs text-dark-50 mt-3 whitespace-pre-wrap">{{ externalInformation }}</p>
@@ -179,6 +426,42 @@
             class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors active:scale-[0.98]"
           >
             {{ copyButtonText }}
+          </button>
+
+          <div v-if="documentContent" class="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-warm-100 border border-warm-300">
+            <span class="text-[11px] text-dark-50">图示模式</span>
+            <select
+              v-model="diagramMode"
+              class="text-[11px] bg-warm-50 border border-warm-300 rounded-md px-2 py-1 text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange/40"
+              :disabled="diagramGenerating"
+              title="信息图：本地渲染（推荐）；成图模型：需要设置 image_model"
+            >
+              <option value="infographic">信息图（推荐）</option>
+              <option value="image_model">成图模型</option>
+              <option value="auto">自动</option>
+            </select>
+          </div>
+
+          <button
+            v-if="documentContent"
+            type="button"
+            @click="insertTechnicalRouteDiagram"
+            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-signal-100 text-signal-700 hover:bg-signal-200 transition-colors active:scale-[0.98]"
+            :disabled="diagramGenerating"
+            :title="diagramGenerating ? '正在生成图...' : `生成并插入技术路线图（${diagramModeLabel} PNG）`"
+          >
+            {{ diagramGenerating ? '生成图...' : '插入技术路线图' }}
+          </button>
+
+          <button
+            v-if="documentContent"
+            type="button"
+            @click="insertResearchFrameworkDiagram"
+            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-signal-100 text-signal-700 hover:bg-signal-200 transition-colors active:scale-[0.98]"
+            :disabled="diagramGenerating"
+            :title="diagramGenerating ? '正在生成图...' : `生成并插入研究框架图（${diagramModeLabel} PNG）`"
+          >
+            {{ diagramGenerating ? '生成图...' : '插入研究框架图' }}
           </button>
 
           <div v-if="documentContent" class="relative" ref="exportDropdown">
@@ -285,16 +568,19 @@ const savedDocumentId = ref(null)
 
 // Streaming progress
 const currentSection = ref('')
+const currentSectionId = ref('')
 const writingProgress = ref({ current: 0, total: 0 })
 const currentStage = ref('')
-const stageOrder = ['outline', 'draft', 'review', 'revise']
+const stageOrder = ['plan', 'outline', 'draft', 'review', 'revise']
 const stageLabels = {
+  plan: '全局规划',
   outline: '提纲生成',
   draft: '内容写作',
   review: '质量评审',
   revise: '修订完善'
 }
 const stageState = reactive({
+  plan: 'pending',
   outline: 'pending',
   draft: 'pending',
   review: 'pending',
@@ -306,10 +592,21 @@ const postProcessLabel = ref('')
 const postProcessMeta = ref(null)
 const postProcessToast = ref('')
 
+// Planner blueprint (default visible)
+const plannerPlan = ref(null)
+const plannerVisible = ref(true)
+const plannerTab = ref('outline')
+
+// Web search
+const searchQuery = ref('')
+const searchResults = ref([])
+const searching = ref(false)
+
 // Session augmentation
 const externalInformation = ref('')
 const skillOverlay = ref(null)
 const uploadedFiles = ref([])
+const sessionDiagrams = ref([])
 
 // UI state
 const fileInputRef = ref(null)
@@ -322,6 +619,15 @@ const toastVisible = ref(false)
 const toastTitle = ref('')
 const toastMessage = ref('')
 let toastTimer = null
+
+// Diagram insertion
+const diagramGenerating = ref(false)
+const diagramMode = ref('infographic')
+const diagramModeLabel = computed(() => {
+  if (diagramMode.value === 'image_model') return '成图模型'
+  if (diagramMode.value === 'auto') return '自动'
+  return '信息图'
+})
 
 // EventSource cleanup
 const eventSourceRef = shallowRef(null)
@@ -378,6 +684,13 @@ const sectionTitleMap = computed(() => {
   return map
 })
 
+const plannerCurrentGuidance = computed(() => {
+  const plan = plannerPlan.value
+  if (!plan || !currentSectionId.value) return null
+  const sg = plan.section_guidance?.[currentSectionId.value]
+  return sg && typeof sg === 'object' ? sg : null
+})
+
 const overlayPreview = computed(() => {
   if (!skillOverlay.value) return { guidelines: '', principles: [], sections: [], material: '' }
   const guidelines = (skillOverlay.value.writing_guidelines_additions || '').trim()
@@ -409,6 +722,93 @@ const notifyModelNotConfigured = (error) => {
     return true
   }
   return false
+}
+
+const runSearch = async () => {
+  if (!sessionId.value) return
+  const query = (searchQuery.value || '').trim()
+  if (!query) return
+  searching.value = true
+  try {
+    const response = await api.post(`/chat/session/${sessionId.value}/search-web`, { query, top_k: 5 })
+    searchResults.value = response.data.results || []
+    await fetchSessionMeta()
+    showToast('搜索完成', response.data.message || `已追加 ${searchResults.value.length} 条来源`)
+  } catch (e) {
+    console.error('Search failed:', e)
+    showToast('搜索失败', e.response?.data?.detail || '网络搜索失败，请重试。')
+  } finally {
+    searching.value = false
+  }
+}
+
+const insertAfterFirstHeading = (markdown, snippet) => {
+  const text = markdown || ''
+  const lines = text.split('\n')
+  const idx = lines.findIndex((ln) => ln.trim().startsWith('#'))
+  if (idx >= 0) {
+    lines.splice(idx + 1, 0, '', snippet, '')
+    return lines.join('\n')
+  }
+  return `${snippet}\n\n${text}`.trim() + '\n'
+}
+
+const insertTechnicalRouteDiagram = async () => {
+  if (!sessionId.value) return
+  if (!documentContent.value) return
+  if (diagramGenerating.value) return
+  diagramGenerating.value = true
+  try {
+    const response = await api.post(`/chat/session/${sessionId.value}/generate-diagram`, {
+      title: '技术路线图',
+      diagram_type: 'technical_route',
+      mode: diagramMode.value
+    })
+    const snippet = response.data.markdown_snippet
+    if (!snippet) {
+      showToast('生成失败', '未返回可插入的图示。')
+      return
+    }
+    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
+    await saveDocument()
+    await fetchSessionMeta()
+    showToast('已插入图示', '技术路线图已插入到文档开头。')
+  } catch (e) {
+    console.error('Diagram generation failed:', e)
+    if (notifyModelNotConfigured(e)) return
+    showToast('生成失败', e.response?.data?.detail || '生成图示失败，请重试。')
+  } finally {
+    diagramGenerating.value = false
+  }
+}
+
+const insertResearchFrameworkDiagram = async () => {
+  if (!sessionId.value) return
+  if (!documentContent.value) return
+  if (diagramGenerating.value) return
+  diagramGenerating.value = true
+  try {
+    const response = await api.post(`/chat/session/${sessionId.value}/generate-diagram`, {
+      title: '研究框架图',
+      diagram_type: 'research_framework',
+      mode: diagramMode.value
+    })
+    const snippet = response.data.markdown_snippet
+    if (!snippet) {
+      showToast('生成失败', '未返回可插入的图示。')
+      return
+    }
+    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
+    await saveDocument()
+    await fetchSessionMeta()
+    showToast('已插入图示', '研究框架图已插入到文档开头。')
+  } catch (e) {
+    console.error('Diagram generation failed:', e)
+    if (notifyModelNotConfigured(e)) return
+    showToast('生成失败', e.response?.data?.detail || '生成图示失败，请重试。')
+  } finally {
+    diagramGenerating.value = false
+  }
 }
 
 const resetStageState = () => {
@@ -478,6 +878,8 @@ const fetchSessionMeta = async () => {
     const response = await api.get(`/chat/session/${sessionId.value}/requirements`)
     externalInformation.value = response.data.external_information || ''
     skillOverlay.value = response.data.skill_overlay || null
+    sessionDiagrams.value = response.data.diagrams || []
+    plannerPlan.value = response.data.planner_plan || plannerPlan.value
   } catch (e) {
     console.error('Failed to fetch session meta:', e)
   }
@@ -504,6 +906,9 @@ const startSession = async () => {
     sessionId.value = response.data.session_id
     savedDocumentId.value = null
     skillOverlay.value = null
+    plannerPlan.value = null
+    currentSectionId.value = ''
+    currentSection.value = ''
     await fetchSessionMeta()
     await fetchSessionFiles()
   } catch (e) {
@@ -536,6 +941,10 @@ const startStreamGeneration = async () => {
   resetStageState()
   isPostProcessing.value = false
   postProcessLabel.value = ''
+  plannerPlan.value = null
+  plannerTab.value = 'outline'
+  plannerVisible.value = true
+  currentSectionId.value = ''
 
   try {
     const eventSource = new EventSource(`/api/chat/generate/${sessionId.value}/stream`)
@@ -547,7 +956,14 @@ const startStreamGeneration = async () => {
         case 'start':
           writingProgress.value.total = data.total_sections
           break
+        case 'plan':
+          plannerPlan.value = data.plan || plannerPlan.value
+          break
+        case 'plan_error':
+          showToast('蓝图生成失败', data.error || 'Planner 生成失败')
+          break
         case 'section_start': {
+          currentSectionId.value = data.section_id || ''
           currentSection.value = data.section_title
           writingProgress.value.current = data.section_index
           resetStageState()

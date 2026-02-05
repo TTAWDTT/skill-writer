@@ -32,6 +32,7 @@
             <p class="text-sm text-dark-50">
               <span v-if="currentConfig.has_api_key || currentConfig.has_github_token">
                 模型：{{ currentConfig.model }}
+                <span v-if="currentConfig.image_model" class="ml-2 text-[11px] text-dark-50">· 成图：{{ currentConfig.image_model }}</span>
               </span>
               <span v-else class="text-red-300">未配置 API Key</span>
             </p>
@@ -197,16 +198,41 @@
       <div class="mb-4">
         <div class="flex items-center justify-between mb-2">
           <label class="block text-sm font-medium text-dark-100">模型</label>
-          <span class="text-xs text-dark-50">固定列表</span>
+          <span class="text-xs text-dark-50">手动输入</span>
         </div>
-        <select
+        <input
           v-model="formData.model"
+          type="text"
+          :list="selectedPreset?.models?.length ? 'model-suggestions' : undefined"
+          placeholder="例如：gpt-4o-mini"
           class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
-        >
-          <option v-for="model in selectedPreset.models" :key="model" :value="model">
-            {{ model }}
-          </option>
-        </select>
+        />
+        <datalist v-if="selectedPreset?.models?.length" id="model-suggestions">
+          <option v-for="model in selectedPreset.models" :key="model" :value="model" />
+        </datalist>
+      </div>
+
+      <!-- Image Model (Optional) -->
+      <div v-if="!selectedPreset.requires_oauth" class="mb-4">
+        <div class="flex items-center justify-between mb-2">
+          <label class="block text-sm font-medium text-dark-100">成图模型（可选）</label>
+          <span class="text-xs text-dark-50">用于生成图示</span>
+        </div>
+        <input
+          v-model="formData.image_model"
+          type="text"
+          list="image-model-suggestions"
+          placeholder="例如：gpt-image-1 / dall-e-3"
+          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+        />
+        <datalist id="image-model-suggestions">
+          <option value="gpt-image-1" />
+          <option value="dall-e-3" />
+          <option value="dall-e-2" />
+        </datalist>
+        <p class="text-[11px] text-dark-50 mt-2">
+          留空则使用本地信息图渲染（推荐：文字更清晰、可下载 SVG 编辑）。
+        </p>
       </div>
 
       <!-- Temperature -->
@@ -332,6 +358,7 @@ const formData = reactive({
   api_key: '',
   base_url: '',
   model: '',
+  image_model: '',
   temperature: 0.3,
 })
 
@@ -377,8 +404,11 @@ const fetchConfig = async () => {
 
 const selectPreset = (preset) => {
   selectedPreset.value = preset
-  formData.base_url = preset.base_url
-  formData.model = preset.default_model
+  const isCurrent = preset?.name && preset.name === currentConfig.value?.provider_name
+  formData.base_url = isCurrent ? (currentConfig.value.base_url || preset.base_url) : preset.base_url
+  formData.model = isCurrent ? (currentConfig.value.model || preset.default_model) : preset.default_model
+  formData.image_model = isCurrent ? (currentConfig.value.image_model || '') : ''
+  formData.temperature = isCurrent ? (currentConfig.value.temperature ?? 0.3) : 0.3
   formData.api_key = ''
   testResult.value = null
 }
@@ -406,6 +436,7 @@ const testConnection = async () => {
           api_key: formData.api_key,
           base_url: formData.base_url || undefined,
           model: formData.model || undefined,
+          image_model: formData.image_model || undefined,
           temperature: formData.temperature,
         })
         const configRes = await api.get('/config/llm')
@@ -438,6 +469,7 @@ const saveConfig = async () => {
       api_key: formData.api_key || undefined,
       base_url: formData.base_url || undefined,
       model: formData.model || undefined,
+      image_model: formData.image_model || undefined,
       temperature: formData.temperature,
     })
 

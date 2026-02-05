@@ -136,3 +136,14 @@ html {
 .markdown-content li {
   margin: 0.25rem 0;
 }
+
+.markdown-content img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+  margin: 1rem auto;
+  border-radius: 0.75rem;
+  border: 1px solid rgba(255, 255, 255, 0.10);
+  background: rgba(20, 28, 38, 0.6);
+  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
+}
