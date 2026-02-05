@@ -29,6 +29,7 @@ ENV/
 # IDE
 .idea/
 .vscode/
+.obsidian/
 *.swp
 *.swo
 *~
@@ -84,3 +85,6 @@ nul
 
 # LLM config with sensitive data (use template instead)
 backend/data/llm_config.json
+
+# Local artifacts
+backend/data/skills.zip
