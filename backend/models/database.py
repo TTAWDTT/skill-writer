@@ -40,6 +40,12 @@ class Session(Base):
     # 会话级 Skill 覆盖
     skill_overlay = Column(Text, nullable=True)  # JSON
 
+    # Planner 蓝图（JSON）
+    planner_plan = Column(Text, nullable=True)  # JSON
+
+    # 生成的图示（SVG/mermaid 等），用于导出/下载
+    diagrams = Column(Text, default="[]")  # JSON
+
     # 文档
     final_document = Column(Text, nullable=True)
 
@@ -65,6 +71,8 @@ class Session(Base):
             "uploaded_files": json.loads(self.uploaded_files) if self.uploaded_files else [],
             "external_information": self.external_information or "",
             "skill_overlay": json.loads(self.skill_overlay) if self.skill_overlay else None,
+            "planner_plan": json.loads(self.planner_plan) if self.planner_plan else None,
+            "diagrams": json.loads(self.diagrams) if self.diagrams else [],
             "final_document": self.final_document,
             "error": self.error,
             "created_at": self.created_at.isoformat() if self.created_at else None,
@@ -137,6 +145,14 @@ class Database:
         if "skill_overlay" not in existing_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN skill_overlay TEXT"))
+
+        if "planner_plan" not in existing_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN planner_plan TEXT"))
+
+        if "diagrams" not in existing_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN diagrams TEXT DEFAULT '[]'"))
 
     def get_session(self):
         """获取数据库会话"""

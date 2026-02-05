@@ -50,6 +50,12 @@ class SessionState:
     # 会话级 Skill 覆盖（仅对当前会话生效）
     skill_overlay: Optional[Dict] = None
 
+    # Planner 输出的全文蓝图（可用于前端展示/复用）
+    planner_plan: Optional[Dict] = None
+
+    # 会话内生成的图示（SVG 等，可下载/可复用）
+    diagrams: List[Dict] = field(default_factory=list)
+
     # 时间戳
     created_at: str = field(default_factory=lambda: datetime.now().isoformat())
     updated_at: str = field(default_factory=lambda: datetime.now().isoformat())

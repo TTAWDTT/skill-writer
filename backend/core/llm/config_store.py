@@ -25,6 +25,9 @@ class LLMConfig(BaseModel):
     # 注意：OpenAI SDK 期望 base_url 包含 /v1
     base_url: str = "https://api.deepseek.com/v1"
     model: str = "deepseek-chat"
+    # Optional: image generation model (OpenAI-compatible /images/generations).
+    # When empty, diagram generation falls back to local infographic rendering.
+    image_model: str = ""
     temperature: float = 0.3
     max_tokens: int = 4096
 
@@ -139,6 +142,13 @@ PROVIDER_PRESETS = {
         ],
         "requires_oauth": True,
     },
+    "antigravity": {
+        "provider": LLMProviderType.OPENAI_COMPATIBLE,
+        "provider_name": "antigravity",
+        "base_url": "http://127.0.0.1:8045/v1",
+        "model": "gemini-3-flash",
+        "models": [],
+    },
 }
 
 
@@ -200,5 +210,11 @@ def has_llm_credentials(config: Optional[LLMConfig] = None) -> bool:
         return bool(config.api_key)
     if config.api_key:
         return True
+    # Some local OpenAI-compatible providers (e.g. Ollama) may not require API keys.
+    # For most gateways/proxies (including local ones), require an API key unless we can
+    # confidently identify a no-key local provider by base_url/provider_name.
     base_url = (config.base_url or "").lower()
-    return "localhost" in base_url or "127.0.0.1" in base_url
+    provider_name = (config.provider_name or "").lower()
+    is_local = ("localhost" in base_url) or ("127.0.0.1" in base_url)
+    is_ollama = ("11434" in base_url) or ("ollama" in provider_name)
+    return is_local and is_ollama

@@ -35,6 +35,7 @@ class ConfigUpdateRequest(BaseModel):
     api_key: Optional[str] = None
     base_url: Optional[str] = None
     model: Optional[str] = None
+    image_model: Optional[str] = None
     temperature: Optional[float] = None
 
 
@@ -74,6 +75,7 @@ async def get_config():
         "provider_name": config.provider_name,
         "base_url": config.base_url,
         "model": config.model,
+        "image_model": getattr(config, "image_model", "") or "",
         "temperature": config.temperature,
         "has_api_key": bool(config.api_key),
         "has_github_token": bool(config.github_token),
@@ -113,21 +115,23 @@ async def update_config(request: ConfigUpdateRequest):
         new_base_url = request.base_url or preset["base_url"]
         new_provider = preset["provider"]
         new_provider_name = preset["provider_name"]
+        same_provider = (
+            current_config.provider == new_provider
+            and (current_config.base_url or "") == (new_base_url or "")
+            and (current_config.provider_name or "") == (new_provider_name or "")
+        )
 
         # 避免“切换服务商但复用旧 key”导致错误显示/误用：只有在服务商 + base_url 未变化时才保留旧 key
         if request.api_key is None:
-            api_key = (
-                current_config.api_key
-                if (
-                    current_config.provider == new_provider
-                    and (current_config.base_url or "") == (new_base_url or "")
-                    and (current_config.provider_name or "") == (new_provider_name or "")
-                )
-                else ""
-            )
+            api_key = current_config.api_key if same_provider else ""
         else:
             # 允许显式清空（传空字符串）
             api_key = request.api_key
+
+        if request.image_model is None:
+            image_model = getattr(current_config, "image_model", "") if same_provider else ""
+        else:
+            image_model = request.image_model or ""
 
         new_config = LLMConfig(
             provider=new_provider,
@@ -135,6 +139,7 @@ async def update_config(request: ConfigUpdateRequest):
             api_key=api_key,
             base_url=new_base_url,
             model=request.model or preset["model"],
+            image_model=image_model,
             temperature=request.temperature if request.temperature is not None else current_config.temperature,
             github_token=current_config.github_token,
             github_user=current_config.github_user,
@@ -144,19 +149,21 @@ async def update_config(request: ConfigUpdateRequest):
         new_base_url = request.base_url or current_config.base_url
         new_provider = LLMProviderType.OPENAI_COMPATIBLE
         new_provider_name = "Custom"
+        same_provider = (
+            current_config.provider == new_provider
+            and (current_config.base_url or "") == (new_base_url or "")
+            and (current_config.provider_name or "") == (new_provider_name or "")
+        )
 
         if request.api_key is None:
-            api_key = (
-                current_config.api_key
-                if (
-                    current_config.provider == new_provider
-                    and (current_config.base_url or "") == (new_base_url or "")
-                    and (current_config.provider_name or "") == (new_provider_name or "")
-                )
-                else ""
-            )
+            api_key = current_config.api_key if same_provider else ""
         else:
             api_key = request.api_key
+
+        if request.image_model is None:
+            image_model = getattr(current_config, "image_model", "") if same_provider else ""
+        else:
+            image_model = request.image_model or ""
 
         new_config = LLMConfig(
             provider=new_provider,
@@ -164,6 +171,7 @@ async def update_config(request: ConfigUpdateRequest):
             api_key=api_key,
             base_url=new_base_url,
             model=request.model or current_config.model,
+            image_model=image_model,
             temperature=request.temperature if request.temperature is not None else current_config.temperature,
             github_token=current_config.github_token,
             github_user=current_config.github_user,

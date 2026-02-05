@@ -20,6 +20,7 @@ class WritingState:
     completed_sections: List[str] = field(default_factory=list)
     total_sections: int = 0
     external_information: str = ""  # 从上传文件提取的外部信息
+    planner_plan: Optional[Dict[str, Any]] = None  # Planner/Outline Manager output
 
 
 class WriterAgent(BaseAgent):
@@ -314,7 +315,9 @@ class WriterAgent(BaseAgent):
     def _build_context(
         self,
         requirements: Dict[str, Any],
-        state: WritingState
+        state: WritingState,
+        *,
+        section_id: Optional[str] = None,
     ) -> Dict[str, Any]:
         """构建写作上下文"""
         context = {
@@ -326,7 +329,77 @@ class WriterAgent(BaseAgent):
         if state.sections:
             context["written_sections"] = state.sections
 
+        plan = state.planner_plan or {}
+        if plan:
+            context["planner_plan"] = plan
+            # Convenience keys for templates/prompts
+            context["global_thesis"] = plan.get("global_thesis", "")
+            context["global_outline"] = plan.get("global_outline", "")
+            if section_id:
+                sg = (plan.get("section_guidance") or {}).get(section_id)
+                if isinstance(sg, dict):
+                    context["section_guidance"] = sg
+
         return context
+
+    def _format_planner_block(self, *, plan: Optional[Dict[str, Any]], section_id: str) -> str:
+        if not plan or not isinstance(plan, dict):
+            return ""
+
+        global_thesis = str(plan.get("global_thesis") or "").strip()
+        global_outline = str(plan.get("global_outline") or "").strip()
+        terminology = plan.get("terminology") or []
+        guidance = (plan.get("section_guidance") or {}).get(section_id) or {}
+
+        parts = []
+        if global_thesis:
+            parts.append("## 全文主线\n" + global_thesis)
+        if global_outline:
+            parts.append("## 全文蓝图（供一致性参考）\n" + global_outline)
+
+        if isinstance(terminology, list) and terminology:
+            items = []
+            for item in terminology[:12]:
+                if not isinstance(item, dict):
+                    continue
+                term = str(item.get("term") or "").strip()
+                definition = str(item.get("definition") or "").strip()
+                if term and definition:
+                    items.append(f"- {term}：{definition}")
+            if items:
+                parts.append("## 术语约定\n" + "\n".join(items))
+
+        if isinstance(guidance, dict) and guidance:
+            objective = str(guidance.get("objective") or "").strip()
+            key_points = guidance.get("key_points") or []
+            must_mention = guidance.get("must_mention") or []
+            avoid = guidance.get("avoid") or []
+            cross_refs = guidance.get("cross_refs") or []
+
+            g_parts = []
+            if objective:
+                g_parts.append(f"- 目的：{objective}")
+            if isinstance(key_points, list) and key_points:
+                bullets = "\n".join(f"  - {str(p).strip()}" for p in key_points if str(p).strip())
+                if bullets.strip():
+                    g_parts.append("- 关键要点：\n" + bullets)
+            if isinstance(must_mention, list) and must_mention:
+                bullets = "\n".join(f"  - {str(p).strip()}" for p in must_mention if str(p).strip())
+                if bullets.strip():
+                    g_parts.append("- 必须提及：\n" + bullets)
+            if isinstance(avoid, list) and avoid:
+                bullets = "\n".join(f"  - {str(p).strip()}" for p in avoid if str(p).strip())
+                if bullets.strip():
+                    g_parts.append("- 避免：\n" + bullets)
+            if isinstance(cross_refs, list) and cross_refs:
+                bullets = "\n".join(f"  - {str(p).strip()}" for p in cross_refs if str(p).strip())
+                if bullets.strip():
+                    g_parts.append("- 承接/引用：\n" + bullets)
+
+            if g_parts:
+                parts.append("## 本章写作计划（Planner）\n" + "\n".join(g_parts))
+
+        return "\n\n".join(parts).strip()
 
     def _format_requirements_for_prompt(
         self,
@@ -351,6 +424,8 @@ class WriterAgent(BaseAgent):
         requirements_text = self._format_requirements_for_prompt(skill, requirements)
         external_excerpt = (state.external_information or "")[:1200]
         external_block = f"\n\n## 参考材料\n{external_excerpt}" if external_excerpt else ""
+        planner_block = self._format_planner_block(plan=state.planner_plan, section_id=section.id)
+        planner_hint = f"\n\n{planner_block}\n" if planner_block else ""
 
         prompt = f"""请为章节「{section.title}」生成 3-6 条清晰的提纲要点。
 
@@ -366,6 +441,7 @@ class WriterAgent(BaseAgent):
 ## 已知需求
 {requirements_text}
 {external_block}
+{planner_hint}
 
 请只输出提纲列表，不要输出正文。
 """
@@ -386,9 +462,12 @@ class WriterAgent(BaseAgent):
         outline: str,
     ) -> str:
         """根据提纲生成章节草稿"""
-        context = self._build_context(requirements, state)
+        context = self._build_context(requirements, state, section_id=section.id)
         prompt = skill.get_section_prompt(section, context)
+        planner_block = self._format_planner_block(plan=state.planner_plan, section_id=section.id)
+        planner_insert = ("\n\n" + planner_block + "\n") if planner_block else ""
         draft_prompt = f"""{prompt}
+{planner_insert}
 
 ## 章节提纲
 {outline}
@@ -417,6 +496,8 @@ class WriterAgent(BaseAgent):
         requirements_text = self._format_requirements_for_prompt(skill, requirements)
         external_excerpt = (state.external_information or "")[:1200]
         external_block = f"\n\n## 参考材料\n{external_excerpt}" if external_excerpt else ""
+        planner_block = self._format_planner_block(plan=state.planner_plan, section_id=section.id)
+        planner_hint = f"\n\n{planner_block}\n" if planner_block else ""
         issues_text = "\n".join(f"- {i}" for i in issues) if issues else "无"
         suggestions_text = "\n".join(f"- {s}" for s in suggestions) if suggestions else "无"
 
@@ -428,6 +509,7 @@ class WriterAgent(BaseAgent):
 ## 已知需求
 {requirements_text}
 {external_block}
+{planner_hint}
 
 ## 原始内容
 {draft}

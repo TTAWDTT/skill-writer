@@ -13,6 +13,7 @@ from backend.core.skills.overlay import apply_skill_overlay
 from backend.core.agents.requirement_agent import RequirementAgent, RequirementState
 from backend.core.agents.writer_agent import WriterAgent, WritingState
 from backend.core.agents.reviewer_agent import ReviewerAgent
+from backend.core.agents.planner_agent import PlannerAgent
 from backend.core.agents.document_polisher_agent import DocumentPolisherAgent
 
 # 从独立模块导入 SessionState 避免循环依赖
@@ -54,6 +55,7 @@ class SimpleWorkflow:
     def __init__(self, store=None):
         self.registry = get_registry()
         self.requirement_agent = RequirementAgent()
+        self.planner_agent = PlannerAgent()
         self.writer_agent = WriterAgent()
         self.reviewer_agent = ReviewerAgent()
         self.document_polisher_agent = DocumentPolisherAgent()
@@ -206,14 +208,34 @@ class SimpleWorkflow:
         skill = self.registry.get(session.skill_id)
         if not skill:
             return {"error": f"Skill 不存在: {session.skill_id}"}
+        skill = apply_skill_overlay(skill, session.skill_overlay)
 
         try:
             flat_sections = skill.get_flat_sections()
+
+            planner_plan = None
+            try:
+                planner_result = await self.planner_agent.run(
+                    skill=skill,
+                    requirements=session.requirements or {},
+                    external_information=session.external_information,
+                )
+                planner_plan = {
+                    "global_thesis": planner_result.global_thesis,
+                    "global_outline": planner_result.global_outline,
+                    "section_guidance": planner_result.section_guidance,
+                    "terminology": planner_result.terminology,
+                    "risks": planner_result.risks,
+                }
+            except Exception:
+                planner_plan = None
+
             state = WritingState(
                 skill_id=skill.metadata.id,
                 requirements=session.requirements or {},
                 total_sections=len(flat_sections),
                 external_information=session.external_information,
+                planner_plan=planner_plan,
             )
             session.sections = {}
             session.review_results = {}
@@ -303,11 +325,39 @@ class SimpleWorkflow:
 
         try:
             flat_sections = skill.get_flat_sections()
+
+            yield {"type": "stage_start", "stage": "plan"}
+            planner_plan = None
+            try:
+                planner_result = await self.planner_agent.run(
+                    skill=skill,
+                    requirements=session.requirements or {},
+                    external_information=session.external_information,
+                )
+                planner_plan = {
+                    "global_thesis": planner_result.global_thesis,
+                    "global_outline": planner_result.global_outline,
+                    "section_guidance": planner_result.section_guidance,
+                    "terminology": planner_result.terminology,
+                    "risks": planner_result.risks,
+                }
+                yield {"type": "stage_complete", "stage": "plan"}
+                yield {"type": "plan", "plan": planner_plan}
+                session.planner_plan = planner_plan
+                self.store.save(session)
+            except Exception:
+                planner_plan = None
+                yield {"type": "stage_complete", "stage": "plan"}
+                session.planner_plan = None
+                self.store.save(session)
+                yield {"type": "plan_error", "error": "Planner 生成失败（请检查模型配置/网络/日志）"}
+
             state = WritingState(
                 skill_id=skill.metadata.id,
                 requirements=session.requirements or {},
                 total_sections=len(flat_sections),
                 external_information=session.external_information,
+                planner_plan=planner_plan,
             )
             session.sections = {}
             session.review_results = {}

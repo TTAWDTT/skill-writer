@@ -10,6 +10,9 @@ from datetime import datetime
 import uuid
 import io
 import re
+import base64
+import tempfile
+import httpx
 
 from backend.models.database import get_database, Document as DocumentModel
 
@@ -205,10 +208,11 @@ async def export_content(request: ExportRequest):
     elif format_type == "docx":
         try:
             from docx import Document
-            from docx.shared import Pt, RGBColor
+            from docx.shared import Pt, RGBColor, Inches
             from docx.oxml.ns import qn
             from docx.oxml import OxmlElement
             from docx.enum.style import WD_STYLE_TYPE
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
 
             doc = Document()
 
@@ -328,6 +332,79 @@ async def export_content(request: ExportRequest):
                     run = paragraph.add_run(text)
                     set_run_font(run, font_size=font_size)
 
+            image_pattern = re.compile(r'^!\[([^\]]*)\]\(([^)]+)\)\s*$')
+
+            def _load_image_bytes(src: str) -> Optional[tuple[bytes, str]]:
+                if not src:
+                    return None
+                src = src.strip()
+
+                # data URI
+                if src.startswith("data:image/"):
+                    m = re.match(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", src)
+                    if not m:
+                        return None
+                    mime = m.group(1).lower()
+                    b64 = m.group(2)
+                    try:
+                        raw = base64.b64decode(b64)
+                    except Exception:
+                        return None
+                    ext = "png"
+                    if "jpeg" in mime or "jpg" in mime:
+                        ext = "jpg"
+                    elif "png" in mime:
+                        ext = "png"
+                    return raw, ext
+
+                # remote
+                if src.startswith("http://") or src.startswith("https://"):
+                    try:
+                        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                            resp = client.get(src)
+                            resp.raise_for_status()
+                            raw = resp.content
+                        # best-effort ext guess
+                        ext = "png" if src.lower().endswith(".png") else "jpg" if src.lower().endswith((".jpg", ".jpeg")) else "png"
+                        return raw, ext
+                    except Exception:
+                        return None
+
+                return None
+
+            def _add_markdown_image(line: str) -> bool:
+                m = image_pattern.match(line.strip())
+                if not m:
+                    return False
+                alt = (m.group(1) or "").strip()
+                src = (m.group(2) or "").strip()
+                loaded = _load_image_bytes(src)
+                if not loaded:
+                    # fall back: treat as plain text
+                    para = doc.add_paragraph()
+                    parse_inline_formatting(para, line)
+                    return True
+
+                raw, ext = loaded
+                stream = io.BytesIO(raw)
+                # Help python-docx with type inference
+                try:
+                    stream.name = f"image.{ext}"  # type: ignore[attr-defined]
+                except Exception:
+                    pass
+
+                para = doc.add_paragraph()
+                para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                run = para.add_run()
+                # Fit page width roughly (A4 default)
+                run.add_picture(stream, width=Inches(6.2))
+                if alt:
+                    cap = doc.add_paragraph()
+                    cap.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                    r = cap.add_run(alt)
+                    set_run_font(r, font_name="宋体", font_size=10, bold=False)
+                return True
+
             # 解析 Markdown 并转换为 Word 格式
             lines = content.split('\n')
             i = 0
@@ -335,6 +412,11 @@ async def export_content(request: ExportRequest):
                 line = lines[i].strip()
 
                 if not line:
+                    i += 1
+                    continue
+
+                # Markdown image: ![alt](src)
+                if _add_markdown_image(line):
                     i += 1
                     continue
 
@@ -372,7 +454,15 @@ async def export_content(request: ExportRequest):
                     # 收集连续的非空行作为一个段落
                     para_lines = [line]
                     i += 1
-                    while i < len(lines) and lines[i].strip() and not lines[i].strip().startswith('#') and not lines[i].strip().startswith('- ') and not (lines[i].strip().startswith('* ') and not lines[i].strip().startswith('**')) and not re.match(r'^\d+\. ', lines[i].strip()):
+                    while (
+                        i < len(lines)
+                        and lines[i].strip()
+                        and not lines[i].strip().startswith('#')
+                        and not image_pattern.match(lines[i].strip())
+                        and not lines[i].strip().startswith('- ')
+                        and not (lines[i].strip().startswith('* ') and not lines[i].strip().startswith('**'))
+                        and not re.match(r'^\d+\. ', lines[i].strip())
+                    ):
                         para_lines.append(lines[i].strip())
                         i += 1
 
@@ -401,6 +491,7 @@ async def export_content(request: ExportRequest):
         try:
             from fpdf import FPDF
             import re as re_module
+            import os
 
             # 创建 PDF，设置合理的边距
             pdf = FPDF()
@@ -445,61 +536,124 @@ async def export_content(request: ExportRequest):
 
             content = clean_text(content)
 
+            image_pattern = re_module.compile(r'^!\[([^\]]*)\]\(([^)]+)\)\s*$')
+
+            def _load_image_bytes(src: str) -> Optional[tuple[bytes, str]]:
+                if not src:
+                    return None
+                src = src.strip()
+                if src.startswith("data:image/"):
+                    m = re_module.match(r"^data:(image/[a-zA-Z0-9.+-]+);base64,(.+)$", src)
+                    if not m:
+                        return None
+                    mime = m.group(1).lower()
+                    b64 = m.group(2)
+                    try:
+                        raw = base64.b64decode(b64)
+                    except Exception:
+                        return None
+                    ext = "png"
+                    if "jpeg" in mime or "jpg" in mime:
+                        ext = "jpg"
+                    elif "png" in mime:
+                        ext = "png"
+                    return raw, ext
+
+                if src.startswith("http://") or src.startswith("https://"):
+                    try:
+                        with httpx.Client(timeout=30.0, follow_redirects=True) as client:
+                            resp = client.get(src)
+                            resp.raise_for_status()
+                            raw = resp.content
+                        ext = "png" if src.lower().endswith(".png") else "jpg" if src.lower().endswith((".jpg", ".jpeg")) else "png"
+                        return raw, ext
+                    except Exception:
+                        return None
+                return None
+
             # 解析 Markdown 并添加到 PDF
-            lines = content.split('\n')
-            for line in lines:
-                line = line.rstrip()
+            with tempfile.TemporaryDirectory(prefix="skillwriter_pdf_") as td:
+                lines = content.split('\n')
+                for line in lines:
+                    line = line.rstrip()
 
-                if not line:
-                    pdf.ln(5)
-                    continue
+                    if not line:
+                        pdf.ln(5)
+                        continue
 
-                # 如果没有加载中文字体，跳过非ASCII字符的行（避免渲染错误）
-                if not font_loaded:
-                    try:
-                        line.encode('latin-1')
-                    except UnicodeEncodeError:
-                        # 包含非ASCII字符，尝试移除它们
-                        line = ''.join(char for char in line if ord(char) < 128)
-                        if not line.strip():
+                    # Image line
+                    im = image_pattern.match(line.strip())
+                    if im:
+                        alt = (im.group(1) or "").strip()
+                        src = (im.group(2) or "").strip()
+                        loaded = _load_image_bytes(src)
+                        if loaded:
+                            raw, ext = loaded
+                            tmp_path = os.path.join(td, f"img_{uuid.uuid4().hex}.{ext}")
+                            with open(tmp_path, "wb") as f:
+                                f.write(raw)
+                            # Page break if needed
+                            if pdf.get_y() > pdf.page_break_trigger - 60:
+                                pdf.add_page()
+                                pdf.set_font(font_name, size=12)
                             pdf.ln(3)
+                            max_w = pdf.w - pdf.l_margin - pdf.r_margin
+                            try:
+                                pdf.image(tmp_path, w=max_w)
+                            except Exception:
+                                pass
+                            if alt:
+                                pdf.ln(2)
+                                pdf.set_font_size(10)
+                                pdf.multi_cell(0, 5, alt)
+                                pdf.set_font_size(12)
+                            pdf.ln(4)
                             continue
 
-                try:
-                    # 处理标题
-                    if line.startswith('#'):
-                        level = len(re_module.match(r'^#+', line).group())
-                        title_text = line.lstrip('#').strip()
-                        if not title_text:
-                            continue
-                        sizes = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 10}
-                        pdf.set_font_size(sizes.get(level, 12))
-                        pdf.ln(6)
-                        pdf.multi_cell(0, 8, title_text)
-                        pdf.set_font_size(12)
-                        pdf.ln(3)
+                    # 如果没有加载中文字体，跳过非ASCII字符的行（避免渲染错误）
+                    if not font_loaded:
+                        try:
+                            line.encode('latin-1')
+                        except UnicodeEncodeError:
+                            line = ''.join(char for char in line if ord(char) < 128)
+                            if not line.strip():
+                                pdf.ln(3)
+                                continue
 
-                    # 处理列表
-                    elif line.startswith('- ') or line.startswith('* '):
-                        list_text = line[2:].strip()
-                        if list_text:
-                            pdf.multi_cell(0, 6, '  - ' + list_text)
-
-                    elif re_module.match(r'^\d+\. ', line):
-                        pdf.multi_cell(0, 6, '  ' + line)
-
-                    # 普通段落
-                    else:
-                        pdf.multi_cell(0, 6, line)
-
-                except Exception as line_error:
-                    # 如果单行渲染失败，尝试简化后继续
                     try:
-                        simple_line = ''.join(char for char in line if ord(char) < 128)
-                        if simple_line.strip():
-                            pdf.multi_cell(0, 6, simple_line)
-                    except:
-                        pass  # 跳过无法渲染的行
+                        # 处理标题
+                        if line.startswith('#'):
+                            level = len(re_module.match(r'^#+', line).group())
+                            title_text = line.lstrip('#').strip()
+                            if not title_text:
+                                continue
+                            sizes = {1: 18, 2: 16, 3: 14, 4: 12, 5: 11, 6: 10}
+                            pdf.set_font_size(sizes.get(level, 12))
+                            pdf.ln(6)
+                            pdf.multi_cell(0, 8, title_text)
+                            pdf.set_font_size(12)
+                            pdf.ln(3)
+
+                        # 处理列表
+                        elif line.startswith('- ') or line.startswith('* '):
+                            list_text = line[2:].strip()
+                            if list_text:
+                                pdf.multi_cell(0, 6, '  - ' + list_text)
+
+                        elif re_module.match(r'^\d+\. ', line):
+                            pdf.multi_cell(0, 6, '  ' + line)
+
+                        # 普通段落
+                        else:
+                            pdf.multi_cell(0, 6, line)
+
+                    except Exception:
+                        try:
+                            simple_line = ''.join(char for char in line if ord(char) < 128)
+                            if simple_line.strip():
+                                pdf.multi_cell(0, 6, simple_line)
+                        except Exception:
+                            pass
 
             # 输出 PDF
             pdf_content = pdf.output()

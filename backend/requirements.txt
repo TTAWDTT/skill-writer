@@ -29,3 +29,6 @@ pypdf>=4.0.0
 python-multipart>=0.0.6
 pyyaml>=6.0
 jinja2>=3.1.0
+
+# Diagrams / Infographics
+pillow>=10.0.0

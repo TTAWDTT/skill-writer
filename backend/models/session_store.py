@@ -36,6 +36,8 @@ class DatabaseSessionStore:
                 uploaded_files=json.loads(record.uploaded_files) if record.uploaded_files else [],
                 external_information=record.external_information or "",
                 skill_overlay=json.loads(record.skill_overlay) if record.skill_overlay else None,
+                planner_plan=json.loads(record.planner_plan) if getattr(record, "planner_plan", None) else None,
+                diagrams=json.loads(record.diagrams) if getattr(record, "diagrams", None) else [],
                 created_at=record.created_at.isoformat() if record.created_at else datetime.now().isoformat(),
                 updated_at=record.updated_at.isoformat() if record.updated_at else datetime.now().isoformat(),
                 error=record.error,
@@ -59,6 +61,8 @@ class DatabaseSessionStore:
                 record.uploaded_files = json.dumps(session.uploaded_files)
                 record.external_information = session.external_information
                 record.skill_overlay = json.dumps(session.skill_overlay) if session.skill_overlay else None
+                record.planner_plan = json.dumps(getattr(session, "planner_plan", None)) if getattr(session, "planner_plan", None) else None
+                record.diagrams = json.dumps(getattr(session, "diagrams", []) or [])
                 record.final_document = session.final_document
                 record.error = session.error
                 record.updated_at = datetime.utcnow()
@@ -77,6 +81,8 @@ class DatabaseSessionStore:
                     uploaded_files=json.dumps(session.uploaded_files),
                     external_information=session.external_information,
                     skill_overlay=json.dumps(session.skill_overlay) if session.skill_overlay else None,
+                    planner_plan=json.dumps(getattr(session, "planner_plan", None)) if getattr(session, "planner_plan", None) else None,
+                    diagrams=json.dumps(getattr(session, "diagrams", []) or []),
                     final_document=session.final_document,
                     error=session.error,
                 )
@@ -111,6 +117,8 @@ class DatabaseSessionStore:
                     uploaded_files=json.loads(r.uploaded_files) if r.uploaded_files else [],
                     external_information=r.external_information or "",
                     skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
+                    planner_plan=json.loads(r.planner_plan) if getattr(r, "planner_plan", None) else None,
+                    diagrams=json.loads(r.diagrams) if getattr(r, "diagrams", None) else [],
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),
                     error=r.error,
@@ -143,6 +151,8 @@ class DatabaseSessionStore:
                     uploaded_files=json.loads(r.uploaded_files) if r.uploaded_files else [],
                     external_information=r.external_information or "",
                     skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
+                    planner_plan=json.loads(r.planner_plan) if getattr(r, "planner_plan", None) else None,
+                    diagrams=json.loads(r.diagrams) if getattr(r, "diagrams", None) else [],
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),
                     error=r.error,

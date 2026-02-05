@@ -11,6 +11,11 @@ import re
 import json
 import logging
 import time
+import datetime
+import base64
+import uuid
+
+import httpx
 
 from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
@@ -90,6 +95,19 @@ class UploadFilesRequest(BaseModel):
 class GenerateFieldRequest(BaseModel):
     """生成单个字段请求"""
     field_id: str
+
+
+class WebSearchRequest(BaseModel):
+    """Web 搜索请求"""
+    query: str
+    top_k: int = 5
+
+
+class DiagramRequest(BaseModel):
+    """生成图示请求"""
+    title: Optional[str] = None
+    diagram_type: str = "technical_route"  # technical_route | research_framework
+    mode: str = "infographic"  # infographic | image_model | auto
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -876,6 +894,471 @@ async def generate_field(session_id: str, request: GenerateFieldRequest):
     }
 
 
+def _format_search_sources(query: str, results: List[dict]) -> str:
+    ts = datetime.datetime.now().isoformat(timespec="seconds")
+    lines = [f"## Web Search（{ts}）", f"查询：{query}", ""]
+    for idx, r in enumerate(results, start=1):
+        title = (r.get("title") or "").strip()
+        url = (r.get("url") or "").strip()
+        snippet = (r.get("snippet") or "").strip()
+        lines.append(f"{idx}. {title}")
+        if url:
+            lines.append(f"   - URL: {url}")
+        if snippet:
+            lines.append(f"   - 摘要: {snippet}")
+    return "\n".join(lines).strip()
+
+
+async def _duckduckgo_search(query: str, top_k: int = 5) -> List[dict]:
+    q = (query or "").strip()
+    if not q:
+        return []
+    top_k = max(1, min(int(top_k or 5), 10))
+
+    url = "https://duckduckgo.com/html/"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122 Safari/537.36",
+        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+    }
+    async with httpx.AsyncClient(headers=headers, timeout=30.0, follow_redirects=True) as client:
+        resp = await client.post(url, data={"q": q})
+        resp.raise_for_status()
+        html = resp.text
+
+    results: List[dict] = []
+    for m in re.finditer(r'<a[^>]+class="result__a"[^>]+href="([^"]+)"[^>]*>([\s\S]*?)</a>', html):
+        href = m.group(1)
+        raw_title = m.group(2)
+        title = re.sub(r"<[^>]+>", "", raw_title)
+        title = re.sub(r"\s+", " ", title).strip()
+
+        snippet = ""
+        tail = html[m.end(): m.end() + 2500]
+        sm = re.search(r'class="result__snippet"[^>]*>([\s\S]*?)</a>|class="result__snippet"[^>]*>([\s\S]*?)</div>', tail)
+        if sm:
+            raw = sm.group(1) or sm.group(2) or ""
+            snippet = re.sub(r"<[^>]+>", "", raw)
+            snippet = re.sub(r"\s+", " ", snippet).strip()
+
+        if href and title:
+            results.append({"title": title, "url": href, "snippet": snippet})
+        if len(results) >= top_k:
+            break
+    return results
+
+
+@router.post("/session/{session_id}/search-web")
+async def search_web(session_id: str, request: WebSearchRequest):
+    """Web 搜索并把来源追加到会话 external_information（用于后续写作引用/背景补充）"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    query = (request.query or "").strip()
+    if not query:
+        raise HTTPException(status_code=400, detail="query 不能为空")
+
+    results = await _duckduckgo_search(query, request.top_k)
+    if not results:
+        return {"success": True, "session_id": session_id, "query": query, "results": [], "message": "未检索到结果"}
+
+    block = _format_search_sources(query, results)
+    session.append_external_info(block)
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "query": query,
+        "results": results,
+        "message": f"已写入外部信息（{len(results)} 条来源）",
+    }
+
+
+def _extract_json_obj(text: str) -> dict:
+    raw = (text or "").strip()
+    if not raw:
+        return {}
+    raw = re.sub(r"^```(?:json)?\\s*", "", raw).strip()
+    raw = re.sub(r"\\s*```$", "", raw).strip()
+    try:
+        obj = json.loads(raw)
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        pass
+
+    # Best-effort: grab the largest {...} block
+    m = re.search(r"\\{[\\s\\S]*\\}", raw)
+    if not m:
+        return {}
+    try:
+        obj = json.loads(m.group(0))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _diagram_storage_dir(session_id: str) -> Path:
+    from backend.config import DATA_DIR
+    p = Path(DATA_DIR) / "diagrams" / session_id
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+def _diagram_paths(session_id: str, diagram_id: str) -> tuple[Path, Path]:
+    d = _diagram_storage_dir(session_id)
+    return d / f"{diagram_id}.png", d / f"{diagram_id}.svg"
+
+
+def _safe_filename(title: str, ext: str) -> str:
+    name = (title or "diagram").strip() or "diagram"
+    safe = re.sub(r"[^\\u4e00-\\u9fff0-9a-zA-Z._-]+", "_", name).strip("_") or "diagram"
+    return f"{safe}.{ext}"
+
+
+def _diagram_asset_flags(session_id: str, diagram: dict) -> tuple[bool, bool]:
+    did = diagram.get("id")
+    if not did:
+        return False, False
+    png_path, svg_path = _diagram_paths(session_id, did)
+    has_png = png_path.exists()
+    has_svg = svg_path.exists() or bool(diagram.get("has_svg")) or bool(diagram.get("svg"))
+    return has_png, has_svg
+
+
+@router.post("/session/{session_id}/generate-diagram")
+async def generate_diagram(session_id: str, request: DiagramRequest):
+    """生成图示（两种模式：infographic 本地渲染 / image_model 成图模型）并返回可插入 Markdown 的图片片段"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    _ensure_llm_configured()
+
+    registry = get_registry()
+    skill = registry.get(session.skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
+
+    diagram_type = (request.diagram_type or "technical_route").strip() or "technical_route"
+    if diagram_type not in {"technical_route", "research_framework"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported diagram_type: {diagram_type}")
+
+    mode = (request.mode or "infographic").strip().lower() or "infographic"
+    if mode not in {"infographic", "image_model", "auto"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
+
+    cfg = get_llm_config()
+    image_model = (getattr(cfg, "image_model", None) or "").strip()
+    if mode == "auto":
+        mode = "image_model" if image_model else "infographic"
+
+    title = (request.title or ("研究框架图" if diagram_type == "research_framework" else "技术路线图")).strip()
+    requirements = session.requirements or {}
+
+    req_lines = []
+    for f in skill.requirement_fields:
+        v = requirements.get(f.id)
+        if v is None:
+            continue
+        if isinstance(v, str) and not v.strip():
+            continue
+        req_lines.append(f"- {f.name}({f.id}): {v}")
+    requirements_text = "\n".join(req_lines) if req_lines else "（暂无）"
+
+    external_excerpt = (session.external_information or "").strip()
+    if len(external_excerpt) > 2500:
+        external_excerpt = external_excerpt[:2500]
+
+    # Step 1) Ask chat model for a compact JSON spec (content only; layout is deterministic locally).
+    if diagram_type == "technical_route":
+        json_schema_hint = """{
+  "stages": [
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]}
+  ]
+}"""
+        content_rule = "技术路线图：建议 4 个阶段，体现“目标/问题 → 方法 → 实验验证 → 产出评估”的闭环。"
+    else:
+        json_schema_hint = """{
+  "goal": {"title": "研究目标", "bullets": ["要点1", "要点2", "要点3"]},
+  "hypotheses": {"title": "科学问题/假设", "bullets": ["要点1", "要点2", "要点3"]},
+  "support": {"title": "支撑条件", "bullets": ["要点1", "要点2", "要点3"]},
+  "work_packages": [
+    {"title": "WP1 研究内容", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "WP2 研究内容", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "WP3 研究内容", "bullets": ["要点1", "要点2", "要点3"]}
+  ],
+  "outcomes": {"title": "预期成果", "bullets": ["要点1", "要点2", "要点3"]}
+}"""
+        content_rule = "研究框架图：强调“目标/假设 → 任务包(WP) → 预期成果”，并标出支撑条件。"
+
+    prompt = f"""你是科研申报书的信息图内容策划助手。请根据“已知需求”和“材料摘要”，生成可用于绘制“{title}”的信息图内容 JSON。
+
+只输出 JSON（不要解释、不要 Markdown 代码块）。
+
+硬性约束：
+1) 结构必须严格匹配下面的 JSON 结构示例（字段名保持一致）；
+2) 标题/要点要专业、准确、可直接用于申报书；避免虚构具体结论、数值、实验结果；
+3) 不要出现“待定/未知/自行补充”等字样；信息不足时用抽象但规范的表述补全；
+4) 每个 title <= 14 字；每条 bullets <= 22 字，尽量使用“方法/数据/产出/指标”等结构；
+5) 只基于已知信息组织内容。
+
+内容规则：{content_rule}
+文书类型：{skill.metadata.name}
+
+已知需求：
+{requirements_text}
+
+材料摘要（可为空）：
+{external_excerpt if external_excerpt else "（无）"}
+
+JSON 结构示例：
+{json_schema_hint}
+"""
+
+    messages = [
+        {"role": "system", "content": "你只输出 JSON。"},
+        {"role": "user", "content": prompt},
+    ]
+
+    raw_spec = {}
+    try:
+        spec_text = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=900)
+        raw_spec = _extract_json_obj(spec_text)
+    except Exception as e:
+        logger.warning("diagram spec generation failed: %s", _redact_secrets(str(e))[:240])
+        raw_spec = {}
+
+    diagram_id = str(uuid.uuid4())
+    png_path, svg_path = _diagram_paths(session_id, diagram_id)
+
+    svg_text = ""
+    normalized_spec = {}
+
+    if mode == "infographic":
+        try:
+            from backend.core.diagrams.infographic import render_infographic_png_svg
+            png_bytes, svg_text, normalized_spec = render_infographic_png_svg(diagram_type, raw_spec, title=title)
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"本地信息图渲染失败：{_redact_secrets(str(e))}")
+    else:
+        if not image_model:
+            raise HTTPException(status_code=400, detail="未配置成图模型：请先在设置中填写“成图模型（Image Model）”或改用 infographic 模式")
+
+        # Build a concise, text-friendly prompt from the spec (best-effort).
+        def _lines_from_spec() -> str:
+            if diagram_type == "technical_route":
+                stages = (raw_spec.get("stages") if isinstance(raw_spec, dict) else None) or []
+                out = []
+                for i, st in enumerate(stages[:6] if isinstance(stages, list) else []):
+                    if not isinstance(st, dict):
+                        continue
+                    t = str(st.get("title") or f"阶段{i+1}").strip()
+                    bs = st.get("bullets") or []
+                    btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
+                    if t or btxt:
+                        out.append(f"{i+1}. {t}：{btxt}".strip("："))
+                return "\n".join(out) if out else requirements_text
+
+            # research_framework
+            parts = []
+            for key in ("goal", "hypotheses", "support", "outcomes"):
+                box = raw_spec.get(key) if isinstance(raw_spec, dict) else None
+                if not isinstance(box, dict):
+                    continue
+                t = str(box.get("title") or "").strip()
+                bs = box.get("bullets") or []
+                btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
+                if t or btxt:
+                    parts.append(f"{t}：{btxt}".strip("："))
+            wps = raw_spec.get("work_packages") if isinstance(raw_spec, dict) else None
+            if isinstance(wps, list):
+                for i, wp in enumerate(wps[:3]):
+                    if not isinstance(wp, dict):
+                        continue
+                    t = str(wp.get("title") or f"WP{i+1}").strip()
+                    bs = wp.get("bullets") or []
+                    btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
+                    if t or btxt:
+                        parts.append(f"{t}：{btxt}".strip("："))
+            return "\n".join(parts) if parts else requirements_text
+
+        diagram_kind_cn = "技术路线图" if diagram_type == "technical_route" else "研究框架图"
+        image_prompt = f"""请生成一张可直接用于科研申报书的中文信息图（{diagram_kind_cn}）。
+
+风格要求：
+- 专业、干净、矢量信息图风格（flat design），白色或浅色背景
+- 结构清晰：圆角矩形卡片 + 箭头流程，适合 A4/16:9
+- 中文文字务必清晰可读，不要艺术字，不要水印/Logo
+
+标题：{title}
+内容（请保持含义，不要虚构数据/结论）：
+{_lines_from_spec()}
+"""
+
+        try:
+            from backend.core.diagrams.openai_images import generate_image_png_via_openai_compatible
+            last_err = None
+            for size in ("1792x1024", "1024x1024"):
+                try:
+                    png_bytes, _raw = await generate_image_png_via_openai_compatible(
+                        base_url=cfg.base_url,
+                        api_key=cfg.api_key,
+                        model=image_model,
+                        prompt=image_prompt,
+                        size=size,
+                    )
+                    last_err = None
+                    break
+                except Exception as e:
+                    last_err = e
+                    continue
+            if last_err is not None:
+                raise last_err
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"成图模型生成失败：{_redact_secrets(str(e))}")
+
+    # Save assets
+    try:
+        png_path.write_bytes(png_bytes)
+        if svg_text and mode == "infographic":
+            svg_path.write_text(svg_text, encoding="utf-8")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"保存图示失败：{_redact_secrets(str(e))}")
+
+    # Build markdown snippet (data URI) for direct insertion/export.
+    b64_png = base64.b64encode(png_bytes).decode("ascii")
+    data_uri = f"data:image/png;base64,{b64_png}"
+    snippet = f"![{title}]({data_uri})"
+
+    diagram_record = {
+        "id": diagram_id,
+        "title": title,
+        "diagram_type": diagram_type,
+        "mode": mode,
+        "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+        "has_png": True,
+        "has_svg": bool(svg_text) and mode == "infographic",
+        "spec": normalized_spec or raw_spec or None,
+        "meta": {
+            "provider": getattr(cfg, "provider_name", None),
+            "chat_model": getattr(cfg, "model", None),
+            "image_model": image_model or None,
+        },
+    }
+    session.diagrams = (session.diagrams or []) + [diagram_record]
+    workflow.save_session(session)
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "diagram_id": diagram_id,
+        "title": title,
+        "diagram_type": diagram_type,
+        "mode": mode,
+        "image_data_uri": data_uri,
+        "markdown_snippet": snippet,
+        "has_svg": diagram_record["has_svg"],
+        "png_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.png",
+        "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg" if diagram_record["has_svg"] else None,
+    }
+
+
+@router.get("/session/{session_id}/diagrams")
+async def list_diagrams(session_id: str):
+    """List session diagrams (metadata only)."""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    diagrams = session.diagrams or []
+    return {
+        "session_id": session_id,
+        "diagrams": [
+            {
+                "id": d.get("id"),
+                "title": d.get("title"),
+                "diagram_type": d.get("diagram_type"),
+                "mode": d.get("mode") or ("infographic" if d.get("svg") else "unknown"),
+                "created_at": d.get("created_at"),
+                "has_png": (flags := _diagram_asset_flags(session_id, d))[0],
+                "has_svg": flags[1],
+                "png_url": f"/api/chat/session/{session_id}/diagrams/{d.get('id')}.png" if flags[0] else None,
+                "svg_url": f"/api/chat/session/{session_id}/diagrams/{d.get('id')}.svg" if flags[1] else None,
+            }
+            for d in diagrams
+            if isinstance(d, dict)
+        ],
+    }
+
+
+@router.get("/session/{session_id}/diagrams/{diagram_id}.svg")
+async def get_diagram_svg(session_id: str, diagram_id: str):
+    """Download a stored diagram SVG (infographic mode)."""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    diagram = next((d for d in (session.diagrams or []) if isinstance(d, dict) and d.get("id") == diagram_id), None)
+    if not diagram:
+        raise HTTPException(status_code=404, detail="Diagram not found")
+
+    # New format: file-based SVG
+    _png_path, svg_path = _diagram_paths(session_id, diagram_id)
+    if svg_path.exists():
+        svg = svg_path.read_text(encoding="utf-8", errors="ignore")
+        filename = _safe_filename(diagram.get("title") or "diagram", "svg")
+        return StreamingResponse(
+            iter([svg.encode("utf-8")]),
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    # Backward compatibility: stored inline SVG string (older mermaid-based diagrams)
+    svg_inline = (diagram.get("svg") or "").strip()
+    if svg_inline:
+        filename = _safe_filename(diagram.get("title") or "diagram", "svg")
+        return StreamingResponse(
+            iter([svg_inline.encode("utf-8")]),
+            media_type="image/svg+xml",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+
+    raise HTTPException(status_code=404, detail="SVG 不存在（该图示可能由成图模型生成）")
+
+
+@router.get("/session/{session_id}/diagrams/{diagram_id}.png")
+async def get_diagram_png(session_id: str, diagram_id: str):
+    """Download a stored diagram PNG."""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    diagram = next((d for d in (session.diagrams or []) if isinstance(d, dict) and d.get("id") == diagram_id), None)
+    if not diagram:
+        raise HTTPException(status_code=404, detail="Diagram not found")
+
+    png_path, _svg_path = _diagram_paths(session_id, diagram_id)
+    if not png_path.exists():
+        raise HTTPException(status_code=404, detail="PNG 不存在")
+
+    raw = png_path.read_bytes()
+    filename = _safe_filename(diagram.get("title") or "diagram", "png")
+    return StreamingResponse(
+        iter([raw]),
+        media_type="image/png",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 class UpdateRequirementsRequest(BaseModel):
     """更新需求请求"""
     requirements: dict
@@ -966,7 +1449,35 @@ async def get_requirements(session_id: str):
         "fields": fields,
         "external_information": session.external_information,
         "skill_overlay": session.skill_overlay,
+        "planner_plan": session.planner_plan,
+        "diagrams": [
+            {
+                "id": d.get("id"),
+                "title": d.get("title"),
+                "diagram_type": d.get("diagram_type"),
+                "mode": d.get("mode") or ("infographic" if d.get("svg") else "unknown"),
+                "created_at": d.get("created_at"),
+                "has_png": (flags := _diagram_asset_flags(session_id, d))[0],
+                "has_svg": flags[1],
+                "png_url": f"/api/chat/session/{session_id}/diagrams/{d.get('id')}.png" if flags[0] else None,
+                "svg_url": f"/api/chat/session/{session_id}/diagrams/{d.get('id')}.svg" if flags[1] else None,
+            }
+            for d in (session.diagrams or [])
+            if isinstance(d, dict)
+        ],
     }
+
+
+@router.get("/session/{session_id}/plan")
+async def get_planner_plan(session_id: str):
+    """获取会话的 Planner 蓝图"""
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    if not session.planner_plan:
+        raise HTTPException(status_code=404, detail="Planner 蓝图尚未生成")
+    return {"session_id": session_id, "planner_plan": session.planner_plan}
 
 
 @router.post("/session/{session_id}/start-generation")
