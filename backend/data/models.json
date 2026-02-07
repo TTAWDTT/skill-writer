@@ -1,0 +1,65 @@
+{
+  "schema_version": "1.0",
+  "updated_at": "2024-05-20",
+  "providers": [
+    {
+      "id": "deepseek",
+      "name": "DeepSeek",
+      "base_url": "https://api.deepseek.com/v1",
+      "models": [
+        { "id": "deepseek-chat", "name": "DeepSeek V3", "type": "chat", "context_window": 32768, "pricing": "low" },
+        { "id": "deepseek-coder", "name": "DeepSeek Coder", "type": "code", "context_window": 32768, "pricing": "low" }
+      ]
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI",
+      "base_url": "https://api.openai.com/v1",
+      "models": [
+        { "id": "gpt-4o", "name": "GPT-4o", "type": "chat", "context_window": 128000, "pricing": "medium" },
+        { "id": "gpt-4-turbo", "name": "GPT-4 Turbo", "type": "chat", "context_window": 128000, "pricing": "high" },
+        { "id": "gpt-3.5-turbo", "name": "GPT-3.5 Turbo", "type": "chat", "context_window": 16385, "pricing": "low" },
+        { "id": "dall-e-3", "name": "DALL·E 3", "type": "image", "pricing": "high" }
+      ]
+    },
+    {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "base_url": "https://api.anthropic.com/v1",
+      "models": [
+        { "id": "claude-3-5-sonnet-20240620", "name": "Claude 3.5 Sonnet", "type": "chat", "context_window": 200000, "pricing": "medium" },
+        { "id": "claude-3-opus-20240229", "name": "Claude 3 Opus", "type": "chat", "context_window": 200000, "pricing": "high" },
+        { "id": "claude-3-haiku-20240307", "name": "Claude 3 Haiku", "type": "chat", "context_window": 200000, "pricing": "low" }
+      ]
+    },
+    {
+      "id": "google",
+      "name": "Google Gemini",
+      "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+      "models": [
+        { "id": "gemini-1.5-pro-latest", "name": "Gemini 1.5 Pro", "type": "chat", "context_window": 1048576, "pricing": "medium" },
+        { "id": "gemini-1.5-flash-latest", "name": "Gemini 1.5 Flash", "type": "chat", "context_window": 1048576, "pricing": "low" }
+      ]
+    },
+    {
+      "id": "groq",
+      "name": "Groq",
+      "base_url": "https://api.groq.com/openai/v1",
+      "models": [
+        { "id": "llama3-70b-8192", "name": "Llama 3 70B", "type": "chat", "context_window": 8192, "pricing": "low" },
+        { "id": "llama3-8b-8192", "name": "Llama 3 8B", "type": "chat", "context_window": 8192, "pricing": "low" },
+        { "id": "mixtral-8x7b-32768", "name": "Mixtral 8x7B", "type": "chat", "context_window": 32768, "pricing": "low" }
+      ]
+    },
+    {
+      "id": "ollama",
+      "name": "Ollama (Local)",
+      "base_url": "http://localhost:11434/v1",
+      "models": [
+        { "id": "llama3", "name": "Llama 3 (Local)", "type": "chat", "pricing": "free" },
+        { "id": "mistral", "name": "Mistral (Local)", "type": "chat", "pricing": "free" },
+        { "id": "qwen2", "name": "Qwen 2 (Local)", "type": "chat", "pricing": "free" }
+      ]
+    }
+  ]
+}
