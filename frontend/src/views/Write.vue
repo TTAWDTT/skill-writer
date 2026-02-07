@@ -545,6 +545,12 @@
     </section>
 
     <Toast :show="toastVisible" :title="toastTitle" :message="toastMessage" @close="toastVisible = false" />
+
+    <TextSelectionMenu
+      :visible="selectionMenuVisible"
+      :position="selectionMenuPosition"
+      @generate="handleDiagramGenerationFromSelection"
+    />
   </div>
 </template>
 
@@ -555,6 +561,7 @@ import { marked } from 'marked'
 import { api } from '../api'
 import { debounce } from '../utils/performance'
 import Toast from '../components/Toast.vue'
+import TextSelectionMenu from '../components/TextSelectionMenu.vue'
 
 const route = useRoute()
 const skillId = computed(() => route.params.skillId)
@@ -628,6 +635,92 @@ const diagramModeLabel = computed(() => {
   if (diagramMode.value === 'auto') return '自动'
   return '信息图'
 })
+
+// Text Selection Menu
+const selectionMenuVisible = ref(false)
+const selectionMenuPosition = ref({ top: 0, left: 0 })
+const selectedTextContext = ref('')
+
+const handleMouseUp = (event) => {
+  const selection = window.getSelection()
+  const text = selection.toString().trim()
+
+  if (!text) {
+    selectionMenuVisible.value = false
+    return
+  }
+
+  // Ensure selection is within the markdown content area
+  const contentEl = document.querySelector('.markdown-content')
+  if (!contentEl || !contentEl.contains(selection.anchorNode)) {
+    selectionMenuVisible.value = false
+    return
+  }
+
+  const range = selection.getRangeAt(0)
+  const rect = range.getBoundingClientRect()
+
+  // Calculate position relative to viewport
+  selectionMenuPosition.value = {
+    top: rect.top - 10, // Slightly above selection
+    left: rect.left + (rect.width / 2)
+  }
+
+  selectedTextContext.value = text
+  selectionMenuVisible.value = true
+}
+
+// Global click listener to close menu when clicking elsewhere
+const handleGlobalClick = (event) => {
+  // If clicking on the menu itself, do nothing (handled by stop propagation in menu)
+  if (selectionMenuVisible.value) {
+    selectionMenuVisible.value = false
+  }
+}
+
+const handleDiagramGenerationFromSelection = async (type) => {
+  if (!sessionId.value || !selectedTextContext.value) return
+
+  selectionMenuVisible.value = false
+  diagramGenerating.value = true
+
+  try {
+    const response = await api.post(`/chat/session/${sessionId.value}/generate-diagram`, {
+      title: '生成图示',
+      diagram_type: type, // 'infographic', 'technical_route', 'research_framework'
+      mode: diagramMode.value,
+      context_text: selectedTextContext.value
+    })
+
+    const snippet = response.data.markdown_snippet
+    if (!snippet) {
+      showToast('生成失败', '未返回可插入的图示。')
+      return
+    }
+
+    // Insert after the selection or at the nearest heading
+    // For simplicity and stability, we append it after the current selection's paragraph or at end
+    // But since we can't easily modify the DOM back to source text location,
+    // we fallback to inserting at the top or appending to the end,
+    // OR we can try to find the text in documentContent.
+
+    // Strategy: Append to document for now, user can move it.
+    // Or improved strategy: Insert after the first heading like others
+    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
+
+    await saveDocument()
+    await fetchSessionMeta()
+    showToast('已插入图示', '图示已基于选中内容生成并插入文档。')
+
+  } catch (e) {
+    console.error('Context diagram generation failed:', e)
+    if (notifyModelNotConfigured(e)) return
+    showToast('生成失败', e.response?.data?.detail || '生成失败，请重试。')
+  } finally {
+    diagramGenerating.value = false
+    selectedTextContext.value = ''
+  }
+}
 
 // EventSource cleanup
 const eventSourceRef = shallowRef(null)
@@ -1194,10 +1287,14 @@ onMounted(async () => {
   await fetchSkill()
   await startSession()
   document.addEventListener('click', handleClickOutside)
+  document.addEventListener('mouseup', handleMouseUp)
+  document.addEventListener('mousedown', handleGlobalClick)
 })
 
 onUnmounted(() => {
   document.removeEventListener('click', handleClickOutside)
+  document.removeEventListener('mouseup', handleMouseUp)
+  document.removeEventListener('mousedown', handleGlobalClick)
   closeEventSource()
   if (toastTimer) clearTimeout(toastTimer)
 })

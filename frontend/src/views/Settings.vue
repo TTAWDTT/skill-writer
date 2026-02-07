@@ -51,32 +51,41 @@
     <div class="bg-warm-50 rounded-2xl border border-warm-300 p-6 mb-6">
       <h2 class="text-lg font-semibold text-dark-300 mb-4">选择提供商</h2>
 
-      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-        <button
-          v-for="preset in presets"
-          :key="preset.id"
-          @click="selectPreset(preset)"
-          class="p-4 rounded-xl border-2 transition-all text-left"
-          :class="[
-            selectedPreset?.id === preset.id
-              ? 'border-anthropic-orange bg-anthropic-orange-light/10'
-              : 'border-warm-300 hover:border-warm-400 bg-warm-100'
-          ]"
+      <div class="relative">
+        <select
+          :value="selectedPreset?.id"
+          @change="(e) => selectPreset(presets.find(p => p.id === e.target.value))"
+          class="w-full px-4 py-3 pr-10 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent appearance-none cursor-pointer"
         >
-          <div class="flex items-center gap-3 mb-2">
-            <div class="w-8 h-8 rounded-lg bg-warm-200 flex items-center justify-center">
-              <span class="text-sm font-bold text-dark-100">{{ preset.name.charAt(0) }}</span>
-            </div>
-          <span class="font-medium text-dark-300">{{ preset.name }}</span>
+          <option value="" disabled>请选择模型提供商...</option>
+          <option
+            v-for="preset in presets"
+            :key="preset.id"
+            :value="preset.id"
+          >
+            {{ preset.name }} {{ preset.base_url ? `(${preset.base_url})` : '' }}
+          </option>
+        </select>
+
+        <!-- Custom Arrow Icon -->
+        <div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-dark-50">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
         </div>
-          <p class="text-xs text-dark-50 truncate">{{ preset.base_url }}</p>
-          <div v-if="preset.requires_oauth" class="mt-2">
-            <span class="text-xs bg-signal-100 text-signal-700 px-2 py-0.5 rounded-full">OAuth</span>
-          </div>
-          <div v-if="preset.no_api_key" class="mt-2">
-            <span class="text-xs bg-green-900/30 text-green-300 px-2 py-0.5 rounded-full">无需 API Key</span>
-          </div>
-        </button>
+      </div>
+
+      <!-- Selected Provider Info Badges -->
+      <div v-if="selectedPreset" class="mt-4 flex flex-wrap gap-2">
+        <div v-if="selectedPreset.requires_oauth">
+          <span class="text-xs bg-signal-100 text-signal-700 px-2 py-0.5 rounded-full">需要 OAuth</span>
+        </div>
+        <div v-if="selectedPreset.no_api_key">
+          <span class="text-xs bg-green-900/30 text-green-300 px-2 py-0.5 rounded-full">无需 API Key</span>
+        </div>
+        <div v-if="selectedPreset.base_url" class="text-xs text-dark-50 flex items-center">
+          <span class="mr-1">Base URL:</span> {{ selectedPreset.base_url }}
+        </div>
       </div>
     </div>
 
@@ -198,18 +207,34 @@
       <div class="mb-4">
         <div class="flex items-center justify-between mb-2">
           <label class="block text-sm font-medium text-dark-100">模型</label>
-          <span class="text-xs text-dark-50">手动输入</span>
         </div>
+
+        <div v-if="selectedPreset?.models?.length" class="relative">
+          <select
+            v-model="formData.model"
+            class="w-full px-4 py-3 pr-10 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent appearance-none cursor-pointer"
+          >
+            <option value="" disabled>请选择对话模型...</option>
+            <option
+              v-for="model in selectedPreset.models.filter(m => m.type !== 'image')"
+              :key="model.id"
+              :value="model.id"
+            >
+              {{ model.name }} ({{ model.id }})
+            </option>
+          </select>
+          <div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-dark-50">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </div>
+        </div>
+
         <input
+          v-else
           v-model="formData.model"
           type="text"
-          :list="selectedPreset?.models?.length ? 'model-suggestions' : undefined"
           placeholder="例如：gpt-4o-mini"
           class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         />
-        <datalist v-if="selectedPreset?.models?.length" id="model-suggestions">
-          <option v-for="model in selectedPreset.models" :key="model" :value="model" />
-        </datalist>
       </div>
 
       <!-- Image Model (Optional) -->
@@ -218,21 +243,37 @@
           <label class="block text-sm font-medium text-dark-100">成图模型（可选）</label>
           <span class="text-xs text-dark-50">用于生成图示</span>
         </div>
-        <input
-          v-model="formData.image_model"
-          type="text"
-          list="image-model-suggestions"
-          placeholder="例如：gpt-image-1 / dall-e-3"
-          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
-        />
-        <datalist id="image-model-suggestions">
-          <option value="gpt-image-1" />
-          <option value="dall-e-3" />
-          <option value="dall-e-2" />
-        </datalist>
-        <p class="text-[11px] text-dark-50 mt-2">
-          留空则使用本地信息图渲染（推荐：文字更清晰、可下载 SVG 编辑）。
-        </p>
+
+        <div v-if="selectedPreset?.models?.some(m => m.type === 'image')" class="relative">
+          <select
+            v-model="formData.image_model"
+            class="w-full px-4 py-3 pr-10 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent appearance-none cursor-pointer"
+          >
+            <option value="">(无) 使用本地信息图渲染</option>
+            <option
+              v-for="model in selectedPreset.models.filter(m => m.type === 'image')"
+              :key="model.id"
+              :value="model.id"
+            >
+              {{ model.name }} ({{ model.id }})
+            </option>
+          </select>
+          <div class="absolute inset-y-0 right-0 flex items-center px-4 pointer-events-none text-dark-50">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
+          </div>
+        </div>
+
+        <div v-else>
+          <input
+            v-model="formData.image_model"
+            type="text"
+            placeholder="例如：dall-e-3 (留空则使用本地渲染)"
+            class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+          />
+          <p class="text-[11px] text-dark-50 mt-2">
+            当前提供商未列出绘图模型，可手动输入或留空（推荐：留空使用本地 SVG 渲染，文字更清晰）。
+          </p>
+        </div>
       </div>
 
       <!-- Temperature -->
