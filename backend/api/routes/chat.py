@@ -19,6 +19,8 @@ import httpx
 
 from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
+from backend.config import settings
+from backend.core.diagrams.smart_generator import SmartDiagramGenerator
 from backend.core.agents.file_extractor import (
     parse_uploaded_file,
     extract_info_from_multiple_files,
@@ -106,8 +108,11 @@ class WebSearchRequest(BaseModel):
 class DiagramRequest(BaseModel):
     """生成图示请求"""
     title: Optional[str] = None
-    diagram_type: str = "technical_route"  # technical_route | research_framework
+    diagram_type: str = "technical_route"  # technical_route | research_framework | freestyle
     mode: str = "infographic"  # infographic | image_model | auto
+    # New fields for selection-based diagramming
+    selected_text: Optional[str] = None
+    context_text: Optional[str] = None
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -1043,7 +1048,8 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
     diagram_type = (request.diagram_type or "technical_route").strip() or "technical_route"
-    if diagram_type not in {"technical_route", "research_framework"}:
+    # Allow freestyle type
+    if diagram_type not in {"technical_route", "research_framework", "freestyle"}:
         raise HTTPException(status_code=400, detail=f"Unsupported diagram_type: {diagram_type}")
 
     mode = (request.mode or "infographic").strip().lower() or "infographic"
@@ -1055,26 +1061,104 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
     if mode == "auto":
         mode = "image_model" if image_model else "infographic"
 
-    title = (request.title or ("研究框架图" if diagram_type == "research_framework" else "技术路线图")).strip()
-    requirements = session.requirements or {}
+    title = (request.title or ("研究框架图" if diagram_type == "research_framework" else "图示")).strip()
 
-    req_lines = []
-    for f in skill.requirement_fields:
-        v = requirements.get(f.id)
-        if v is None:
-            continue
-        if isinstance(v, str) and not v.strip():
-            continue
-        req_lines.append(f"- {f.name}({f.id}): {v}")
-    requirements_text = "\n".join(req_lines) if req_lines else "（暂无）"
+    # Context preparation
+    if request.selected_text:
+        # User selected specific text -> Focus on that
+        requirements_text = request.selected_text
+        external_excerpt = (request.context_text or "")[:1000] # Optional surrounding context
+    else:
+        # Default: use global requirements
+        requirements = session.requirements or {}
+        req_lines = []
+        for f in skill.requirement_fields:
+            v = requirements.get(f.id)
+            if v is None:
+                continue
+            if isinstance(v, str) and not v.strip():
+                continue
+            req_lines.append(f"- {f.name}({f.id}): {v}")
+        requirements_text = "\n".join(req_lines) if req_lines else "（暂无）"
+        external_excerpt = (session.external_information or "").strip()
+        if len(external_excerpt) > 2500:
+            external_excerpt = external_excerpt[:2500]
 
-    external_excerpt = (session.external_information or "").strip()
-    if len(external_excerpt) > 2500:
-        external_excerpt = external_excerpt[:2500]
+    # Handle Freestyle (Text -> SVG)
+    if diagram_type == "freestyle":
+        if not settings.GEMINI_API_KEY:
+             raise HTTPException(status_code=400, detail="自由绘图模式需要配置 Gemini API Key")
 
-    # Step 1) Ask chat model for a compact JSON spec (content only; layout is deterministic locally).
-    if diagram_type == "technical_route":
-        json_schema_hint = """{
+        try:
+            smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
+            svg_text = await smart_gen.generate_freestyle_svg(requirements_text, title) # title used as hint for type if needed or just use 'flowchart'
+
+            # Save SVG
+            diagram_id = str(uuid.uuid4())
+            _png_path, svg_path = _diagram_paths(session_id, diagram_id)
+            svg_path.write_text(svg_text, encoding="utf-8")
+
+            # Generate dummy PNG or convert (skipped for now, frontend renders SVG)
+            # For compatibility, we claim has_png=False if we don't generate it,
+            # but frontend might expect PNG.
+            # Ideally we use a library to convert SVG to PNG, but to avoid dependencies, we just return SVG.
+
+            data_uri = f"data:image/svg+xml;base64,{base64.b64encode(svg_text.encode('utf-8')).decode('ascii')}"
+            snippet = f"![{title}]({data_uri})"
+
+            diagram_record = {
+                "id": diagram_id,
+                "title": title,
+                "diagram_type": "freestyle",
+                "mode": "svg_code",
+                "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                "has_png": False,
+                "has_svg": True,
+                "meta": {"provider": "google_gemini", "model": "gemini-1.5-pro"},
+            }
+            session.diagrams = (session.diagrams or []) + [diagram_record]
+            workflow.save_session(session)
+
+            return {
+                "success": True,
+                "session_id": session_id,
+                "diagram_id": diagram_id,
+                "title": title,
+                "diagram_type": "freestyle",
+                "mode": "svg_code",
+                "image_data_uri": data_uri,
+                "markdown_snippet": snippet,
+                "has_svg": True,
+                "png_url": None,
+                "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg",
+            }
+        except Exception as e:
+            logger.error(f"Freestyle generation failed: {e}")
+            raise HTTPException(status_code=500, detail=f"自由绘图失败: {str(e)}")
+
+
+    # Step 1) Ask chat model (or Gemini) for a compact JSON spec
+    raw_spec = {}
+
+    # 1.1 Try Gemini if configured (Smarter & Faster)
+    if settings.GEMINI_API_KEY:
+        try:
+            logger.info(f"Using Gemini to generate diagram spec for {diagram_type}...")
+            smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
+            context_text = f"需求与背景：\n{requirements_text}\n\n材料摘要：\n{external_excerpt}"
+
+            if diagram_type == "technical_route":
+                raw_spec = await smart_gen._generate_technical_route_spec(context_text, title)
+            elif diagram_type == "research_framework":
+                raw_spec = await smart_gen._generate_research_framework_spec(context_text, title)
+        except Exception as e:
+            logger.error(f"Gemini diagram generation failed: {e}")
+            raw_spec = {}
+
+    # 1.2 Fallback to default LLM (Writer Agent)
+    if not raw_spec:
+        if diagram_type == "technical_route":
+            json_schema_hint = """{
   "stages": [
     {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
     {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
@@ -1082,9 +1166,9 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
     {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]}
   ]
 }"""
-        content_rule = "技术路线图：建议 4 个阶段，体现“目标/问题 → 方法 → 实验验证 → 产出评估”的闭环。"
-    else:
-        json_schema_hint = """{
+            content_rule = "技术路线图：建议 4 个阶段，体现“目标/问题 → 方法 → 实验验证 → 产出评估”的闭环。"
+        else:
+            json_schema_hint = """{
   "goal": {"title": "研究目标", "bullets": ["要点1", "要点2", "要点3"]},
   "hypotheses": {"title": "科学问题/假设", "bullets": ["要点1", "要点2", "要点3"]},
   "support": {"title": "支撑条件", "bullets": ["要点1", "要点2", "要点3"]},
@@ -1095,9 +1179,9 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
   ],
   "outcomes": {"title": "预期成果", "bullets": ["要点1", "要点2", "要点3"]}
 }"""
-        content_rule = "研究框架图：强调“目标/假设 → 任务包(WP) → 预期成果”，并标出支撑条件。"
+            content_rule = "研究框架图：强调“目标/假设 → 任务包(WP) → 预期成果”，并标出支撑条件。"
 
-    prompt = f"""你是科研申报书的信息图内容策划助手。请根据“已知需求”和“材料摘要”，生成可用于绘制“{title}”的信息图内容 JSON。
+        prompt = f"""你是科研申报书的信息图内容策划助手。请根据“已知需求”和“材料摘要”，生成可用于绘制“{title}”的信息图内容 JSON。
 
 只输出 JSON（不要解释、不要 Markdown 代码块）。
 
@@ -1121,18 +1205,17 @@ JSON 结构示例：
 {json_schema_hint}
 """
 
-    messages = [
-        {"role": "system", "content": "你只输出 JSON。"},
-        {"role": "user", "content": prompt},
-    ]
+        messages = [
+            {"role": "system", "content": "你只输出 JSON。"},
+            {"role": "user", "content": prompt},
+        ]
 
-    raw_spec = {}
-    try:
-        spec_text = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=900)
-        raw_spec = _extract_json_obj(spec_text)
-    except Exception as e:
-        logger.warning("diagram spec generation failed: %s", _redact_secrets(str(e))[:240])
-        raw_spec = {}
+        try:
+            spec_text = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=900)
+            raw_spec = _extract_json_obj(spec_text)
+        except Exception as e:
+            logger.warning("diagram spec generation failed: %s", _redact_secrets(str(e))[:240])
+            raw_spec = {}
 
     diagram_id = str(uuid.uuid4())
     png_path, svg_path = _diagram_paths(session_id, diagram_id)

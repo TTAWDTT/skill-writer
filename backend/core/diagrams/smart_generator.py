@@ -91,3 +91,38 @@ class SmartDiagramGenerator:
         4. JSON only.
         """
         return await self.client.generate_json(prompt)
+
+    async def generate_freestyle_svg(self, text: str, diagram_type: str) -> str:
+        """
+        Generate SVG code directly from text description.
+        Targeting types: flowchart, mindmap, sequence, etc.
+        """
+        prompt = f"""
+        You are an expert Data Visualization Engineer.
+        Generate a professional SVG diagram code based on the user's text.
+
+        Diagram Type: {diagram_type}
+        Context:
+        {text[:5000]}
+
+        Requirements:
+        1. Output ONLY valid SVG code. No markdown code blocks (```xml ... ```), no explanations.
+        2. Style: Modern, clean, professional (similar to draw.io or Visio).
+        3. Background: Transparent or White.
+        4. Text: Use Chinese (Simplified) for content if the input is Chinese.
+        5. Ensure text is legible (font-size >= 12px).
+        6. Do NOT include `<!DOCTYPE>` or `<?xml ...?>` headers, just the `<svg>...</svg>` tag.
+        """
+        raw_svg = await self.client.generate_text(prompt)
+
+        # Cleanup potential markdown fences if Gemini disobeys
+        import re
+        clean = re.sub(r"^```(?:xml|svg)?", "", raw_svg.strip()).strip()
+        clean = re.sub(r"```$", "", clean).strip()
+        if not clean.startswith("<svg"):
+            # Try to find the first <svg ... >
+            match = re.search(r"<svg[\s\S]*</svg>", clean)
+            if match:
+                clean = match.group(0)
+
+        return clean
