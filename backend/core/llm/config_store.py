@@ -69,16 +69,15 @@ def _load_presets_from_json() -> Dict[str, Any]:
                 if pid == "google":
                     provider_type = LLMProviderType.GOOGLE_GEMINI
 
-                # 提取模型 ID 列表
-                model_ids = [m["id"] for m in models]
-                default_model = model_ids[0] if model_ids else ""
+                # 保持模型对象结构，供前端筛选
+                default_model = models[0]["id"] if models else ""
 
                 presets[pid] = {
                     "provider": provider_type,
                     "provider_name": name,
                     "base_url": base_url,
                     "model": default_model,
-                    "models": model_ids,
+                    "models": models,
                     "no_api_key": pid == "ollama", # 特殊处理 Ollama
                 }
         except Exception as e:
@@ -91,8 +90,12 @@ def _load_presets_from_json() -> Dict[str, Any]:
         "base_url": "https://api.githubcopilot.com",
         "model": "gpt-4o",
         "models": [
-            "gpt-4o", "gpt-4o-mini", "o1", "o1-mini",
-            "claude-3.5-sonnet", "gemini-2.0-flash-preview-02-05"
+            {"id": "gpt-4o", "name": "GPT-4o", "type": "chat"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini", "type": "chat"},
+            {"id": "o1", "name": "o1", "type": "chat"},
+            {"id": "o1-mini", "name": "o1-mini", "type": "chat"},
+            {"id": "claude-3.5-sonnet", "name": "Claude 3.5 Sonnet", "type": "chat"},
+            {"id": "gemini-2.0-flash-preview-02-05", "name": "Gemini 2.0 Flash", "type": "chat"}
         ],
         "requires_oauth": True,
     }
