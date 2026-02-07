@@ -21,6 +21,7 @@ from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
 from backend.config import settings
 from backend.core.diagrams.smart_generator import SmartDiagramGenerator
+from backend.core.diagrams.schematics import SchematicsGenerator
 from backend.core.agents.file_extractor import (
     parse_uploaded_file,
     extract_info_from_multiple_files,
@@ -1084,37 +1085,91 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
         if len(external_excerpt) > 2500:
             external_excerpt = external_excerpt[:2500]
 
-    # Handle Freestyle (Text -> SVG)
+    # Handle Freestyle (Text -> SVG/Image)
     if diagram_type == "freestyle":
-        if not settings.GEMINI_API_KEY:
-             raise HTTPException(status_code=400, detail="自由绘图模式需要配置 Gemini API Key")
+        # 1. Try Gemini (Fastest, SVG output)
+        if settings.GEMINI_API_KEY:
+            try:
+                smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
+                svg_text = await smart_gen.generate_freestyle_svg(requirements_text, title)
 
+                # Save SVG
+                diagram_id = str(uuid.uuid4())
+                _png_path, svg_path = _diagram_paths(session_id, diagram_id)
+                svg_path.write_text(svg_text, encoding="utf-8")
+
+                data_uri = f"data:image/svg+xml;base64,{base64.b64encode(svg_text.encode('utf-8')).decode('ascii')}"
+                snippet = f"![{title}]({data_uri})"
+
+                diagram_record = {
+                    "id": diagram_id,
+                    "title": title,
+                    "diagram_type": "freestyle",
+                    "mode": "svg_code",
+                    "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "has_png": False,
+                    "has_svg": True,
+                    "meta": {"provider": "google_gemini", "model": "gemini-1.5-pro"},
+                }
+                session.diagrams = (session.diagrams or []) + [diagram_record]
+                workflow.save_session(session)
+
+                return {
+                    "success": True,
+                    "session_id": session_id,
+                    "diagram_id": diagram_id,
+                    "title": title,
+                    "diagram_type": "freestyle",
+                    "mode": "svg_code",
+                    "image_data_uri": data_uri,
+                    "markdown_snippet": snippet,
+                    "has_svg": True,
+                    "png_url": None,
+                    "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg",
+                }
+            except Exception as e:
+                logger.warning(f"Gemini freestyle generation failed, falling back to Schematics: {e}")
+
+        # 2. Fallback: Schematics Generator (Python Code -> Image)
+        # Uses the configured LLM to write Python code (Schemdraw, Matplotlib, etc.)
         try:
-            smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
-            svg_text = await smart_gen.generate_freestyle_svg(requirements_text, title) # title used as hint for type if needed or just use 'flowchart'
+            logger.info("Using SchematicsGenerator for freestyle diagram...")
+            schematic_gen = SchematicsGenerator()
+            # Combine context
+            full_context = f"需求：{requirements_text}\n\n背景：{external_excerpt}"
 
-            # Save SVG
+            png_bytes, svg_text, code_used = await schematic_gen.generate(full_context, diagram_type, title)
+
+            if not png_bytes and not svg_text:
+                raise Exception("Generated code did not produce any image output")
+
             diagram_id = str(uuid.uuid4())
-            _png_path, svg_path = _diagram_paths(session_id, diagram_id)
-            svg_path.write_text(svg_text, encoding="utf-8")
+            png_path, svg_path = _diagram_paths(session_id, diagram_id)
 
-            # Generate dummy PNG or convert (skipped for now, frontend renders SVG)
-            # For compatibility, we claim has_png=False if we don't generate it,
-            # but frontend might expect PNG.
-            # Ideally we use a library to convert SVG to PNG, but to avoid dependencies, we just return SVG.
+            if png_bytes:
+                png_path.write_bytes(png_bytes)
+            if svg_text:
+                svg_path.write_text(svg_text, encoding="utf-8")
 
-            data_uri = f"data:image/svg+xml;base64,{base64.b64encode(svg_text.encode('utf-8')).decode('ascii')}"
+            # Prefer PNG for markdown compatibility, or SVG data URI if no PNG
+            if png_bytes:
+                b64_img = base64.b64encode(png_bytes).decode("ascii")
+                data_uri = f"data:image/png;base64,{b64_img}"
+            else:
+                b64_img = base64.b64encode(svg_text.encode('utf-8')).decode('ascii')
+                data_uri = f"data:image/svg+xml;base64,{b64_img}"
+
             snippet = f"![{title}]({data_uri})"
 
             diagram_record = {
                 "id": diagram_id,
                 "title": title,
                 "diagram_type": "freestyle",
-                "mode": "svg_code",
+                "mode": "schematic_code",
                 "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                "has_png": False,
-                "has_svg": True,
-                "meta": {"provider": "google_gemini", "model": "gemini-1.5-pro"},
+                "has_png": bool(png_bytes),
+                "has_svg": bool(svg_text),
+                "meta": {"provider": "schematics_generator", "generator": "python_code"},
             }
             session.diagrams = (session.diagrams or []) + [diagram_record]
             workflow.save_session(session)
@@ -1125,16 +1180,17 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
                 "diagram_id": diagram_id,
                 "title": title,
                 "diagram_type": "freestyle",
-                "mode": "svg_code",
+                "mode": "schematic_code",
                 "image_data_uri": data_uri,
                 "markdown_snippet": snippet,
-                "has_svg": True,
-                "png_url": None,
-                "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg",
+                "has_svg": bool(svg_text),
+                "png_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.png" if png_bytes else None,
+                "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg" if svg_text else None,
             }
+
         except Exception as e:
             logger.error(f"Freestyle generation failed: {e}")
-            raise HTTPException(status_code=500, detail=f"自由绘图失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"绘图失败: {str(e)}")
 
 
     # Step 1) Ask chat model (or Gemini) for a compact JSON spec
