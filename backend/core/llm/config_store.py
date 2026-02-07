@@ -4,12 +4,14 @@ LLM 配置存储
 """
 import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from pydantic import BaseModel
 from enum import Enum
+import logging
 
 from backend.config import DATA_DIR
 
+logger = logging.getLogger(__name__)
 
 class LLMProviderType(str, Enum):
     """LLM 服务商类型"""
@@ -39,120 +41,63 @@ class LLMConfig(BaseModel):
     provider_name: str = "DeepSeek"
 
 
-# 预设的服务商配置
-PROVIDER_PRESETS = {
-    "deepseek": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "DeepSeek",
-        # OpenAI compatible endpoint root
-        "base_url": "https://api.deepseek.com/v1",
-        "model": "deepseek-chat",
-        "models": ["deepseek-chat", "deepseek-coder"],
-    },
-    "openai": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "OpenAI",
-        "base_url": "https://api.openai.com/v1",
-        "model": "gpt-4o-mini",
-        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
-    },
-    "zhipu": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "智谱 AI",
-        "base_url": "https://open.bigmodel.cn/api/paas/v4",
-        "model": "glm-4-flash",
-        "models": ["glm-4-plus", "glm-4-flash", "glm-4-air"],
-    },
-    "qwen": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "通义千问",
-        "base_url": "https://dashscope.aliyuncs.com/compatible-mode/v1",
-        "model": "qwen-plus",
-        "models": ["qwen-max", "qwen-plus", "qwen-turbo"],
-    },
-    "ollama": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "Ollama (本地)",
-        "base_url": "http://localhost:11434/v1",
-        "model": "qwen2:7b",
-        "models": ["qwen2:7b", "llama3:8b", "mistral:7b"],
-        "no_api_key": True,
-    },
-    "google_gemini": {
-        "provider": LLMProviderType.GOOGLE_GEMINI,
-        "provider_name": "Google AI Studio",
-        # Gemini API root (models endpoint is `${base_url}/models`)
-        "base_url": "https://generativelanguage.googleapis.com/v1beta",
-        # Default model
-        "model": "gemini-3-flash-preview",
-        # Curated list (from local docs); keep this list explicit to avoid relying on dynamic fetch.
-        "models": [
-            # Gemini 3 (preview)
-            "gemini-3-flash-preview",
-            "gemini-3-pro-preview",
-            "gemini-3-pro-image-preview",
+CONFIG_FILE = DATA_DIR / "llm_config.json"
+MODELS_FILE = DATA_DIR / "models.json"
 
-            # Gemini 2.5 Pro
-            "gemini-2.5-pro",
-            "gemini-2.5-pro-preview-03-25",
-            "gemini-2.5-pro-preview-05-06",
-            "gemini-2.5-pro-preview-06-05",
 
-            # Gemini 2.5 Flash
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-flash-image",
-            "gemini-2.5-flash-preview-05-20",
-            "gemini-2.5-flash-preview-09-25",
-            "gemini-2.5-flash-image-preview",
+def _load_presets_from_json() -> Dict[str, Any]:
+    """从 models.json 加载预设，并转换为系统内部格式"""
+    presets = {}
 
-            # Gemini 2.0
-            "gemini-2.0-flash",
-            "gemini-2.0-flash-001",
-            "gemini-2.0-flash-lite",
-            "gemini-2.0-flash-lite-001",
-            "gemini-2.0-flash-preview-image-generation",
-            "gemini-2.0-flash-lite-preview",
-            "gemini-2.0-flash-lite-preview-02-05",
-        ],
-    },
-    "github_copilot": {
+    # 1. 加载 JSON 配置
+    if MODELS_FILE.exists():
+        try:
+            with open(MODELS_FILE, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+
+            for provider in data.get("providers", []):
+                pid = provider.get("id")
+                name = provider.get("name")
+                base_url = provider.get("base_url")
+                models = provider.get("models", [])
+
+                if not pid or not models:
+                    continue
+
+                # 映射 Provider Type
+                provider_type = LLMProviderType.OPENAI_COMPATIBLE
+                if pid == "google":
+                    provider_type = LLMProviderType.GOOGLE_GEMINI
+
+                # 提取模型 ID 列表
+                model_ids = [m["id"] for m in models]
+                default_model = model_ids[0] if model_ids else ""
+
+                presets[pid] = {
+                    "provider": provider_type,
+                    "provider_name": name,
+                    "base_url": base_url,
+                    "model": default_model,
+                    "models": model_ids,
+                    "no_api_key": pid == "ollama", # 特殊处理 Ollama
+                }
+        except Exception as e:
+            logger.error(f"Failed to load models.json: {e}")
+
+    # 2. 注入 GitHub Copilot (应用特定逻辑，不在通用注册表中)
+    presets["github_copilot"] = {
         "provider": LLMProviderType.GITHUB_COPILOT,
         "provider_name": "GitHub Copilot",
         "base_url": "https://api.githubcopilot.com",
         "model": "gpt-4o",
         "models": [
-            # OpenAI models
-            "gpt-4o",
-            "gpt-4o-mini",
-            "gpt-4.1",
-            "gpt-4.1-mini",
-            "gpt-4.1-nano",
-            "o1",
-            "o1-mini",
-            "o1-preview",
-            "o3-mini",
-            # Anthropic models
-            "claude-3.5-sonnet",
-            "claude-3.5-haiku",
-            "claude-sonnet-4",
-            # Google models
-            "gemini-2.0-flash",
-            "gemini-2.5-pro",
+            "gpt-4o", "gpt-4o-mini", "o1", "o1-mini",
+            "claude-3.5-sonnet", "gemini-2.0-flash-preview-02-05"
         ],
         "requires_oauth": True,
-    },
-    "antigravity": {
-        "provider": LLMProviderType.OPENAI_COMPATIBLE,
-        "provider_name": "antigravity",
-        "base_url": "http://127.0.0.1:8045/v1",
-        "model": "gemini-3-flash",
-        "models": [],
-    },
-}
+    }
 
-
-CONFIG_FILE = DATA_DIR / "llm_config.json"
+    return presets
 
 
 def get_llm_config() -> LLMConfig:
@@ -196,7 +141,7 @@ def save_llm_config(config: LLMConfig) -> bool:
 
 def get_provider_presets() -> dict:
     """获取预设服务商列表"""
-    return PROVIDER_PRESETS
+    return _load_presets_from_json()
 
 
 def has_llm_credentials(config: Optional[LLMConfig] = None) -> bool:
@@ -211,8 +156,6 @@ def has_llm_credentials(config: Optional[LLMConfig] = None) -> bool:
     if config.api_key:
         return True
     # Some local OpenAI-compatible providers (e.g. Ollama) may not require API keys.
-    # For most gateways/proxies (including local ones), require an API key unless we can
-    # confidently identify a no-key local provider by base_url/provider_name.
     base_url = (config.base_url or "").lower()
     provider_name = (config.provider_name or "").lower()
     is_local = ("localhost" in base_url) or ("127.0.0.1" in base_url)
