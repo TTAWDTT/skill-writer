@@ -5,11 +5,11 @@
 @tailwind utilities;
 
 :root {
-  --app-bg: #0B0C0E;
-  --app-card: #111214;
-  --app-border: #1F232A;
-  --app-ink: #F2F2F2;
-  --app-ink-muted: #AAB1BC;
+  --app-bg: #1A1C20;
+  --app-card: #22252A;
+  --app-border: #2E333B;
+  --app-ink: #F7F7F7;
+  --app-ink-muted: #BFC5CE;
   --app-ember: #F07C4A;
   --app-signal: #83A9C4;
   font-family: 'IBM Plex Sans', 'Noto Sans SC', sans-serif;

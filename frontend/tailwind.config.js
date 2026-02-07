@@ -13,13 +13,13 @@ export default {
           'orange-light': '#F6A37E',
           'orange-dark': '#D86637',
         },
-        // Dark surfaces
+        // Dark surfaces (Lightened)
         'warm': {
-          '50': '#0B0C0E',
-          '100': '#111214',
-          '200': '#171A1F',
-          '300': '#1F232A',
-          '400': '#2A303A',
+          '50': '#1A1C20',
+          '100': '#22252A',
+          '200': '#292D33',
+          '300': '#2E333B',
+          '400': '#3A404A',
         },
         // Text tones
         'dark': {

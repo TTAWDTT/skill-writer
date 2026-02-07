@@ -51,7 +51,7 @@
     <div class="bg-warm-50 rounded-2xl border border-warm-300 p-6 mb-6">
       <h2 class="text-lg font-semibold text-dark-300 mb-4">选择提供商</h2>
 
-      <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
         <button
           v-for="preset in presets"
           :key="preset.id"
