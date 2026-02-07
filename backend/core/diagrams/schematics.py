@@ -8,7 +8,8 @@ from typing import Optional, Tuple, Dict, Any
 import subprocess
 import tempfile
 
-from backend.core.llm.config_store import get_llm_config, get_llm_client
+from backend.core.llm.config_store import get_llm_config
+from backend.core.llm.providers import get_llm_client
 from backend.config import DATA_DIR
 
 logger = logging.getLogger(__name__)
