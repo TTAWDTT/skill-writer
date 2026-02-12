@@ -5,6 +5,9 @@
 from typing import Dict, Any, Optional, AsyncGenerator
 from dataclasses import asdict
 from datetime import datetime
+import asyncio
+import logging
+import os
 import uuid
 
 from backend.core.skills.registry import get_registry
@@ -18,6 +21,8 @@ from backend.core.agents.document_polisher_agent import DocumentPolisherAgent
 
 # 从独立模块导入 SessionState 避免循环依赖
 from backend.core.workflow.state import SessionState
+
+logger = logging.getLogger(__name__)
 
 
 class SessionStore:
@@ -60,6 +65,17 @@ class SimpleWorkflow:
         self.reviewer_agent = ReviewerAgent()
         self.document_polisher_agent = DocumentPolisherAgent()
         self.store = store or _get_database_store()
+
+    def _parallel_draft_enabled(self) -> bool:
+        raw = str(os.getenv("WRITER_PARALLEL_DRAFT", "1")).strip().lower()
+        return raw not in {"0", "false", "off", "no"}
+
+    def _parallel_draft_concurrency(self) -> int:
+        try:
+            value = int(str(os.getenv("WRITER_PARALLEL_DRAFT_CONCURRENCY", "3")).strip())
+        except Exception:
+            value = 3
+        return max(1, min(value, 8))
 
     def create_session(self, skill_id: str) -> SessionState:
         """创建新会话"""
@@ -210,6 +226,7 @@ class SimpleWorkflow:
             return {"error": f"Skill 不存在: {session.skill_id}"}
         skill = apply_skill_overlay(skill, session.skill_overlay)
 
+        parallel_draft_tasks: Dict[str, asyncio.Task] = {}
         try:
             flat_sections = skill.get_flat_sections()
 
@@ -241,31 +258,113 @@ class SimpleWorkflow:
             session.review_results = {}
 
             contents = []
+            if self._parallel_draft_enabled() and len(flat_sections) > 1:
+                draft_concurrency = self._parallel_draft_concurrency()
+                semaphore = asyncio.Semaphore(draft_concurrency)
+
+                async def _prefetch_outline_and_draft(section):
+                    local_state = WritingState(
+                        skill_id=skill.metadata.id,
+                        requirements=session.requirements or {},
+                        total_sections=len(flat_sections),
+                        external_information=session.external_information,
+                        planner_plan=planner_plan,
+                    )
+                    async with semaphore:
+                        outline_text = await self.writer_agent.generate_outline(
+                            skill=skill,
+                            section=section,
+                            requirements=session.requirements or {},
+                            state=local_state,
+                        )
+                    async with semaphore:
+                        draft_text = await self.writer_agent.generate_draft(
+                            skill=skill,
+                            section=section,
+                            requirements=session.requirements or {},
+                            state=local_state,
+                            outline=outline_text,
+                        )
+                    return {"outline": outline_text, "draft": draft_text}
+
+                parallel_draft_tasks = {
+                    section.id: asyncio.create_task(_prefetch_outline_and_draft(section))
+                    for section in flat_sections
+                }
+
             for section in flat_sections:
                 state.current_section = section.id
-                section_result = await self.writer_agent.write_section_with_review(
-                    skill=skill,
-                    section=section,
-                    requirements=session.requirements or {},
-                    state=state,
-                    reviewer_agent=self.reviewer_agent,
-                )
+                outline = ""
+                draft = ""
+                if parallel_draft_tasks:
+                    task = parallel_draft_tasks.get(section.id)
+                    if task:
+                        try:
+                            prefetched = await task
+                            outline = str(prefetched.get("outline") or "").strip()
+                            draft = str(prefetched.get("draft") or "")
+                        except Exception as e:
+                            logger.warning(
+                                "parallel draft prefetch failed, fallback to sequential: section=%s err=%s",
+                                section.id,
+                                str(e)[:240],
+                            )
 
-                content = section_result["content"]
-                review = section_result["review"]
+                if not outline:
+                    outline = await self.writer_agent.generate_outline(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                    )
+                if not draft:
+                    draft = await self.writer_agent.generate_draft(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                        outline=outline,
+                    )
+
+                review = await self.reviewer_agent.run(
+                    skill=skill,
+                    section_id=section.id,
+                    content=draft,
+                    requirements=session.requirements or {},
+                )
+                should_revise = not review.revised_content and (not review.passed or review.score < 80)
+
+                content = draft
+                revised = False
+                if review.revised_content:
+                    content = review.revised_content
+                    revised = True
+                elif should_revise:
+                    content = await self.writer_agent.revise_section(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                        draft=draft,
+                        issues=review.issues,
+                        suggestions=review.suggestions,
+                    )
+                    revised = True
+
+                content = self.writer_agent._postprocess_section(section, content)
                 state.sections[section.id] = content
                 state.completed_sections.append(section.id)
                 session.sections[section.id] = content
                 session.review_results[section.id] = {
                     "section_id": section.id,
-                    "outline": section_result["outline"],
-                    "draft": section_result["draft"],
+                    "outline": outline,
+                    "draft": draft,
                     "score": review.score,
                     "passed": review.passed,
                     "issues": review.issues,
                     "suggestions": review.suggestions,
                     "revised_content": review.revised_content,
-                    "revised": section_result["revised"],
+                    "revised": revised,
                 }
 
                 heading = "#" * section.level + " " + section.title
@@ -289,6 +388,12 @@ class SimpleWorkflow:
             }
 
         except Exception as e:
+            if parallel_draft_tasks:
+                pending = [task for task in parallel_draft_tasks.values() if task and not task.done()]
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
             session.phase = "error"
             session.error = str(e)
             self.store.save(session)
@@ -323,6 +428,7 @@ class SimpleWorkflow:
             "total_sections": len(skill.get_flat_sections()),
         }
 
+        parallel_draft_tasks: Dict[str, asyncio.Task] = {}
         try:
             flat_sections = skill.get_flat_sections()
 
@@ -363,6 +469,45 @@ class SimpleWorkflow:
             session.review_results = {}
             all_content = []
 
+            if self._parallel_draft_enabled() and len(flat_sections) > 1:
+                draft_concurrency = self._parallel_draft_concurrency()
+                semaphore = asyncio.Semaphore(draft_concurrency)
+
+                async def _prefetch_outline_and_draft(section):
+                    local_state = WritingState(
+                        skill_id=skill.metadata.id,
+                        requirements=session.requirements or {},
+                        total_sections=len(flat_sections),
+                        external_information=session.external_information,
+                        planner_plan=planner_plan,
+                    )
+                    async with semaphore:
+                        outline_text = await self.writer_agent.generate_outline(
+                            skill=skill,
+                            section=section,
+                            requirements=session.requirements or {},
+                            state=local_state,
+                        )
+                    async with semaphore:
+                        draft_text = await self.writer_agent.generate_draft(
+                            skill=skill,
+                            section=section,
+                            requirements=session.requirements or {},
+                            state=local_state,
+                            outline=outline_text,
+                        )
+                    return {"outline": outline_text, "draft": draft_text}
+
+                parallel_draft_tasks = {
+                    section.id: asyncio.create_task(_prefetch_outline_and_draft(section))
+                    for section in flat_sections
+                }
+                yield {
+                    "type": "parallel_draft_enabled",
+                    "enabled": True,
+                    "concurrency": draft_concurrency,
+                }
+
             for i, section in enumerate(flat_sections):
                 # 发送章节开始事件
                 yield {
@@ -380,12 +525,29 @@ class SimpleWorkflow:
                     "section_id": section.id,
                     "section_title": section.title,
                 }
-                outline = await self.writer_agent.generate_outline(
-                    skill=skill,
-                    section=section,
-                    requirements=session.requirements or {},
-                    state=state,
-                )
+                outline = ""
+                draft = ""
+                if parallel_draft_tasks:
+                    task = parallel_draft_tasks.get(section.id)
+                    if task:
+                        try:
+                            prefetched = await task
+                            outline = str(prefetched.get("outline") or "").strip()
+                            draft = str(prefetched.get("draft") or "")
+                        except Exception as e:
+                            logger.warning(
+                                "parallel draft prefetch failed, fallback to sequential: section=%s err=%s",
+                                section.id,
+                                str(e)[:240],
+                            )
+
+                if not outline:
+                    outline = await self.writer_agent.generate_outline(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                    )
                 yield {
                     "type": "stage_complete",
                     "stage": "outline",
@@ -399,13 +561,14 @@ class SimpleWorkflow:
                     "section_id": section.id,
                     "section_title": section.title,
                 }
-                draft = await self.writer_agent.generate_draft(
-                    skill=skill,
-                    section=section,
-                    requirements=session.requirements or {},
-                    state=state,
-                    outline=outline,
-                )
+                if not draft:
+                    draft = await self.writer_agent.generate_draft(
+                        skill=skill,
+                        section=section,
+                        requirements=session.requirements or {},
+                        state=state,
+                        outline=outline,
+                    )
                 yield {
                     "type": "stage_complete",
                     "stage": "draft",
@@ -523,6 +686,12 @@ class SimpleWorkflow:
             }
 
         except Exception as e:
+            if parallel_draft_tasks:
+                pending = [task for task in parallel_draft_tasks.values() if task and not task.done()]
+                for task in pending:
+                    task.cancel()
+                if pending:
+                    await asyncio.gather(*pending, return_exceptions=True)
             session.phase = "error"
             session.error = str(e)
             self.store.save(session)

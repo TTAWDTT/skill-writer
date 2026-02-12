@@ -1,0 +1,12 @@
+id: scientific-infographic-codegen
+name: scientific-infographic-codegen
+description: 基于全文与重点片段，先概括再结构化，生成可本地代码渲染的信息图 JSON（非成图模型）。
+version: "1.1.0"
+category: diagram
+tags:
+  - infographic
+  - codegen
+  - local-render
+author: skill-writer
+created_at: "2026-02-10"
+updated_at: "2026-02-10"

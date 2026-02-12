@@ -1,0 +1,12 @@
+sections:
+  - id: infographic_spec
+    title: 信息图结构化规格
+    level: 1
+    type: required
+    description: 将全文与重点片段压缩为可渲染的信息图 JSON 规格
+    writing_guide: 仅输出结构化 JSON，避免重复句，突出层次关系与关键要点
+    evaluation_points:
+      - JSON 结构合法
+      - 要点不重复
+      - 保持与全文一致
+

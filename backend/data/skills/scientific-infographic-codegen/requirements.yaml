@@ -1,0 +1,36 @@
+fields:
+  - id: diagram_type
+    name: 图类型
+    description: technical_route / research_framework / infographic
+    type: text
+    required: false
+    collection: infer
+
+  - id: diagram_title
+    name: 图标题
+    description: 图示标题
+    type: text
+    required: false
+    collection: infer
+
+  - id: full_context
+    name: 全文上下文
+    description: 作为背景参考的全文内容
+    type: textarea
+    required: false
+    collection: infer
+
+  - id: focus_context
+    name: 重点片段
+    description: 优先关注的核心内容
+    type: textarea
+    required: false
+    collection: infer
+
+  - id: schema_hint
+    name: JSON 模式
+    description: 目标输出 JSON schema 提示
+    type: textarea
+    required: false
+    collection: infer
+

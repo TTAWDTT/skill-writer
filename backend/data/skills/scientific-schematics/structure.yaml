@@ -1,0 +1,66 @@
+# 图示导向文档结构（用于沉淀图示蓝图与图注）
+
+sections:
+  - id: schematic_brief
+    title: 图示任务简报
+    level: 1
+    type: required
+    description: 明确图示用途、受众、章节位置、边界条件与交付目标
+    word_limit: [200, 500]
+    writing_guide: |
+      用 4-6 条完成：
+      1) 图示服务的章节和使用目的；
+      2) 评审最关心的关键信息；
+      3) 应突出的创新点与验证闭环；
+      4) 不应呈现的内容（避免噪音）；
+      5) 图示阅读顺序（从哪里看到哪里）。
+
+  - id: research_framework
+    title: 研究框架图说明
+    level: 1
+    type: required
+    children:
+      - id: framework_nodes
+        title: 框架节点与关系
+        level: 2
+        type: required
+        description: 给出目标/问题/WP/支撑/成果及其依赖关系
+        word_limit: [320, 900]
+      - id: framework_caption
+        title: 图注与审稿解读
+        level: 2
+        type: required
+        description: 图注需可独立解释图意，并点明主线与创新点
+        word_limit: [180, 420]
+
+  - id: technical_route
+    title: 技术路线图说明
+    level: 1
+    type: required
+    children:
+      - id: route_stages
+        title: 阶段划分与任务流
+        level: 2
+        type: required
+        description: 描述阶段顺序、关键任务、方法、里程碑与阶段产出
+        word_limit: [420, 1100]
+      - id: route_validation
+        title: 验证机制与闭环
+        level: 2
+        type: required
+        description: 明确对照/消融/指标评估及反馈迭代机制
+        word_limit: [260, 680]
+
+  - id: consistency_check
+    title: 图文一致性检查
+    level: 1
+    type: required
+    description: 检查术语、关系、指标、图注与正文是否一致
+    word_limit: [220, 520]
+    writing_guide: |
+      采用清单格式：
+      - 术语口径是否统一；
+      - 图中节点是否在正文可追溯；
+      - 指标与验证口径是否一致；
+      - 图注与图内容是否一一对应；
+      - 是否存在“图上有、文中无”或“文中有、图上无”。

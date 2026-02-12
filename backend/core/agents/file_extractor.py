@@ -3,12 +3,15 @@ File Content Extractor - 使用 LLM 从上传的文件中提取信息
 """
 from typing import Dict, Any, List, Optional
 from pathlib import Path
+import asyncio
 import logging
+import os
 
 from backend.core.llm.providers import get_llm_client
 from backend.core.skills.template_parser import parse_template_file
 
 logger = logging.getLogger(__name__)
+_FILE_EXTRACTION_CONCURRENCY = max(1, min(int(os.getenv("FILE_EXTRACTION_CONCURRENCY", "4")), 12))
 
 
 # 信息提取系统提示词
@@ -341,24 +344,35 @@ async def extract_info_from_multiple_files(
     Returns:
         合并后的提取信息
     """
-    all_extracted_fields = {}
-    all_external_info = []
-    all_summaries = []
+    all_extracted_fields: Dict[str, Any] = {}
+    all_external_info: List[str] = []
+    all_summaries: List[str] = []
 
-    for file_info in files:
+    sem = asyncio.Semaphore(_FILE_EXTRACTION_CONCURRENCY)
+
+    async def _worker(idx: int, file_info: Dict[str, Any]):
         filename = file_info.get("filename", "unknown")
         content = file_info.get("content", "")
-
         if not content:
-            continue
+            return idx, filename, {}
 
-        result = await extract_info_from_file(
-            file_content=content,
-            filename=filename,
-            skill_fields=skill_fields,
-            skill_name=skill_name,
-            existing_requirements=existing_requirements,
-        )
+        async with sem:
+            result = await extract_info_from_file(
+                file_content=content,
+                filename=filename,
+                skill_fields=skill_fields,
+                skill_name=skill_name,
+                existing_requirements=existing_requirements,
+            )
+            return idx, filename, result
+
+    tasks = [asyncio.create_task(_worker(i, file_info)) for i, file_info in enumerate(files)]
+    results = await asyncio.gather(*tasks)
+    results.sort(key=lambda item: item[0])
+
+    for _, filename, result in results:
+        if not result:
+            continue
 
         # 合并提取的字段（后面的文件会覆盖前面的）
         all_extracted_fields.update(result.get("extracted_fields", {}))

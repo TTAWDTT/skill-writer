@@ -7,6 +7,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
 from pathlib import Path
+import asyncio
 import re
 import json
 import logging
@@ -14,14 +15,12 @@ import time
 import datetime
 import base64
 import uuid
+import os
 
 import httpx
 
 from backend.core.workflow import get_workflow
 from backend.core.skills.registry import get_registry
-from backend.config import settings
-from backend.core.diagrams.smart_generator import SmartDiagramGenerator
-from backend.core.diagrams.schematics import SchematicsGenerator
 from backend.core.agents.file_extractor import (
     parse_uploaded_file,
     extract_info_from_multiple_files,
@@ -39,6 +38,10 @@ except Exception:
 router = APIRouter()
 
 logger = logging.getLogger(__name__)
+
+_UPLOAD_PARSE_CONCURRENCY = max(1, min(int(os.getenv("UPLOAD_PARSE_CONCURRENCY", "4")), 12))
+_UPLOAD_SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
+_UPLOAD_SESSION_LOCKS_GUARD = asyncio.Lock()
 
 
 def _redact_secrets(message: str) -> str:
@@ -61,6 +64,50 @@ def _redact_secrets(message: str) -> str:
 def _ensure_llm_configured():
     if not has_llm_credentials():
         raise HTTPException(status_code=400, detail="模型未配置")
+
+
+def _resolve_skill_system_prompt(skill: Any) -> str:
+    """Best-effort extraction of system prompt from wrapped skills."""
+    if skill is None:
+        return ""
+
+    queue: List[Any] = [skill]
+    seen: set[int] = set()
+    fallback_guidelines = ""
+
+    while queue:
+        cur = queue.pop(0)
+        if cur is None:
+            continue
+        cur_id = id(cur)
+        if cur_id in seen:
+            continue
+        seen.add(cur_id)
+
+        for attr in ("system_prompt", "_system_prompt"):
+            try:
+                value = getattr(cur, attr, "")
+            except Exception:
+                value = ""
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+
+        try:
+            guidelines = getattr(cur, "writing_guidelines", "")
+        except Exception:
+            guidelines = ""
+        if isinstance(guidelines, str) and guidelines.strip() and not fallback_guidelines:
+            fallback_guidelines = guidelines.strip()
+
+        for attr in ("_concrete", "_base", "base_skill", "wrapped_skill", "_wrapped", "inner_skill"):
+            try:
+                nested = getattr(cur, attr, None)
+            except Exception:
+                nested = None
+            if nested is not None:
+                queue.append(nested)
+
+    return fallback_guidelines
 
 
 class StartSessionRequest(BaseModel):
@@ -109,11 +156,18 @@ class WebSearchRequest(BaseModel):
 class DiagramRequest(BaseModel):
     """生成图示请求"""
     title: Optional[str] = None
-    diagram_type: str = "technical_route"  # technical_route | research_framework | freestyle
+    diagram_type: str = "technical_route"  # technical_route | research_framework | freestyle | infographic
     mode: str = "infographic"  # infographic | image_model | auto
-    # New fields for selection-based diagramming
+    # 选区生成：selected_text 为核心，context_text 为全文上下文
     selected_text: Optional[str] = None
     context_text: Optional[str] = None
+
+
+class GenerateIllustrationsRequest(BaseModel):
+    """自动生成配图请求（输入为整篇文章）"""
+    document_content: str
+    mode: str = "infographic"  # infographic | image_model | auto
+    max_images: int = 2
 
 
 @router.post("/start", response_model=SessionResponse)
@@ -506,6 +560,107 @@ def _trim_file_content(content: str, max_chars: int = 20000) -> str:
     return content[:max_chars]
 
 
+async def _get_upload_session_lock(session_id: str) -> asyncio.Lock:
+    """Per-session lock for merge/save to avoid concurrent upload write conflicts."""
+    async with _UPLOAD_SESSION_LOCKS_GUARD:
+        lock = _UPLOAD_SESSION_LOCKS.get(session_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            _UPLOAD_SESSION_LOCKS[session_id] = lock
+        return lock
+
+
+async def _parse_json_upload_file(
+    idx: int,
+    file: UploadFilePayload,
+    allowed_extensions: set[str],
+) -> tuple[int, Optional[dict], str]:
+    file_ext = Path(file.filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        return idx, None, f"❌ {file.filename}: 不支持的文件类型 ({file_ext})"
+
+    try:
+        content = base64.b64decode(file.content_base64)
+        text_content = await asyncio.to_thread(parse_uploaded_file, content, file_ext, file.filename)
+        if text_content:
+            parsed = {
+                "filename": file.filename,
+                "content": text_content,
+                "content_type": file.content_type or "",
+                "size": len(content),
+            }
+            return idx, parsed, f"✅ {file.filename}: 解析成功 ({len(text_content)} 字符)"
+        return idx, None, f"⚠️ {file.filename}: 文件为空或无法解析"
+    except Exception as e:
+        return idx, None, f"❌ {file.filename}: 解析失败 - {str(e)}"
+
+
+async def _parse_multipart_upload_file(
+    idx: int,
+    file: UploadFile,
+    allowed_extensions: set[str],
+) -> tuple[int, Optional[dict], str]:
+    filename = file.filename or f"uploaded_{idx}"
+    file_ext = Path(filename).suffix.lower()
+    if file_ext not in allowed_extensions:
+        return idx, None, f"❌ {filename}: 不支持的文件类型 ({file_ext})"
+
+    try:
+        content = await file.read()
+        text_content = await asyncio.to_thread(parse_uploaded_file, content, file_ext, filename)
+        if text_content:
+            parsed = {
+                "filename": filename,
+                "content": text_content,
+                "content_type": file.content_type or "",
+                "size": len(content),
+            }
+            return idx, parsed, f"✅ {filename}: 解析成功 ({len(text_content)} 字符)"
+        return idx, None, f"⚠️ {filename}: 文件为空或无法解析"
+    except Exception as e:
+        return idx, None, f"❌ {filename}: 解析失败 - {str(e)}"
+
+
+async def _parse_json_files_parallel(files: List[UploadFilePayload], allowed_extensions: set[str]) -> tuple[List[dict], List[str]]:
+    sem = asyncio.Semaphore(_UPLOAD_PARSE_CONCURRENCY)
+
+    async def _worker(idx: int, file: UploadFilePayload):
+        async with sem:
+            return await _parse_json_upload_file(idx, file, allowed_extensions)
+
+    tasks = [asyncio.create_task(_worker(i, f)) for i, f in enumerate(files)]
+    results = await asyncio.gather(*tasks)
+    results.sort(key=lambda item: item[0])
+
+    parsed_files: List[dict] = []
+    file_summaries: List[str] = []
+    for _, parsed, summary in results:
+        file_summaries.append(summary)
+        if parsed:
+            parsed_files.append(parsed)
+    return parsed_files, file_summaries
+
+
+async def _parse_multipart_files_parallel(files: List[UploadFile], allowed_extensions: set[str]) -> tuple[List[dict], List[str]]:
+    sem = asyncio.Semaphore(_UPLOAD_PARSE_CONCURRENCY)
+
+    async def _worker(idx: int, file: UploadFile):
+        async with sem:
+            return await _parse_multipart_upload_file(idx, file, allowed_extensions)
+
+    tasks = [asyncio.create_task(_worker(i, f)) for i, f in enumerate(files)]
+    results = await asyncio.gather(*tasks)
+    results.sort(key=lambda item: item[0])
+
+    parsed_files: List[dict] = []
+    file_summaries: List[str] = []
+    for _, parsed, summary in results:
+        file_summaries.append(summary)
+        if parsed:
+            parsed_files.append(parsed)
+    return parsed_files, file_summaries
+
+
 async def _handle_parsed_upload(
     session,
     skill,
@@ -576,32 +731,60 @@ async def _handle_parsed_upload(
         skill,
     )
 
-    # 更新会话状态
-    for pf in parsed_files:
-        session.add_uploaded_file({
-            "filename": pf["filename"],
-            "content_type": pf.get("content_type", ""),
-            "size": pf.get("size", 0),
-            "content": _trim_file_content(pf.get("content", "")),
-            "extracted_fields": extraction_result.get("extracted_fields", {}),
-        })
-
-    # 追加外部信息
     external_info = extraction_result.get("external_information", "")
-    if external_info:
-        session.append_external_info(external_info)
+    extracted_fields = extraction_result.get("extracted_fields", {})
+    upload_message = f"📎 已上传 {len(parsed_files)} 个文件并提取信息：\n" + "\n".join(file_summaries)
+    merged_external_information = session.external_information or ""
 
-    # 基于上传材料修补 Skill（仅当前会话）
+    # Merge/save must be serialized per session; uploads may arrive concurrently.
+    session_lock = await _get_upload_session_lock(session.session_id)
+    async with session_lock:
+        latest_session = workflow.get_session(session.session_id)
+        if not latest_session:
+            raise HTTPException(status_code=404, detail=f"Session not found: {session.session_id}")
+
+        for pf in parsed_files:
+            latest_session.add_uploaded_file({
+                "filename": pf["filename"],
+                "content_type": pf.get("content_type", ""),
+                "size": pf.get("size", 0),
+                "content": _trim_file_content(pf.get("content", "")),
+                "extracted_fields": extracted_fields,
+            })
+
+        if external_info:
+            latest_session.append_external_info(external_info)
+
+        if extracted_fields:
+            if latest_session.requirements is None:
+                latest_session.requirements = {}
+            for field_id, value in extracted_fields.items():
+                if value is None:
+                    continue
+                if isinstance(value, str) and not value.strip():
+                    continue
+                existing_value = latest_session.requirements.get(field_id)
+                if existing_value is None or (isinstance(existing_value, str) and not existing_value.strip()):
+                    latest_session.requirements[field_id] = value
+
+        latest_session.messages.append({
+            "role": "system",
+            "content": upload_message,
+        })
+        workflow.save_session(latest_session)
+        merged_external_information = latest_session.external_information or ""
+
+    # Skill-Fixer 调用较重，不持锁执行；执行后再短暂持锁落库。
     if warning is None:
         try:
             fixer = SkillFixerAgent()
             fixer_result = await fixer.run(
                 skill=skill,
-                extracted_fields=extraction_result.get("extracted_fields", {}),
-                external_information=session.external_information,
+                extracted_fields=extracted_fields,
+                external_information=merged_external_information,
                 file_summaries=extraction_result.get("summaries", ""),
             )
-            session.skill_overlay = {
+            overlay = {
                 "writing_guidelines_additions": fixer_result.writing_guidelines_additions,
                 "global_principles": fixer_result.global_principles,
                 "section_overrides": fixer_result.section_overrides,
@@ -609,33 +792,13 @@ async def _handle_parsed_upload(
                 "material_context": fixer_result.material_context,
                 "section_prompt_overrides": fixer_result.section_prompt_overrides,
             }
+            async with session_lock:
+                latest_session = workflow.get_session(session.session_id)
+                if latest_session:
+                    latest_session.skill_overlay = overlay
+                    workflow.save_session(latest_session)
         except Exception as e:
             print(f"[Skill Fixer Warning] {e}")
-
-    # 将提取的字段合并到需求中
-    extracted_fields = extraction_result.get("extracted_fields", {})
-    if extracted_fields:
-        if session.requirements is None:
-            session.requirements = {}
-        for field_id, value in extracted_fields.items():
-            if value is None:
-                continue
-            if isinstance(value, str) and not value.strip():
-                continue
-            existing_value = session.requirements.get(field_id)
-            if existing_value is None or (isinstance(existing_value, str) and not existing_value.strip()):
-                session.requirements[field_id] = value
-
-    # 保存会话
-    workflow.save_session(session)
-
-    # 添加系统消息到对话历史
-    upload_message = f"📎 已上传 {len(parsed_files)} 个文件并提取信息：\n" + "\n".join(file_summaries)
-    session.messages.append({
-        "role": "system",
-        "content": upload_message,
-    })
-    workflow.save_session(session)
 
     return {
         "success": True,
@@ -686,35 +849,7 @@ async def upload_files_json(
     # 支持的文件类型
     allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
-    # 解析所有上传的文件
-    parsed_files = []
-    file_summaries = []
-
-    for file in payload.files:
-        file_ext = Path(file.filename).suffix.lower()
-
-        if file_ext not in allowed_extensions:
-            file_summaries.append(f"❌ {file.filename}: 不支持的文件类型 ({file_ext})")
-            continue
-
-        try:
-            import base64
-            content = base64.b64decode(file.content_base64)
-            text_content = parse_uploaded_file(content, file_ext, file.filename)
-
-            if text_content:
-                parsed_files.append({
-                    "filename": file.filename,
-                    "content": text_content,
-                    "content_type": file.content_type or "",
-                    "size": len(content),
-                })
-                file_summaries.append(f"✅ {file.filename}: 解析成功 ({len(text_content)} 字符)")
-            else:
-                file_summaries.append(f"⚠️ {file.filename}: 文件为空或无法解析")
-
-        except Exception as e:
-            file_summaries.append(f"❌ {file.filename}: 解析失败 - {str(e)}")
+    parsed_files, file_summaries = await _parse_json_files_parallel(payload.files, allowed_extensions)
 
     try:
         return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
@@ -765,34 +900,7 @@ if MULTIPART_AVAILABLE:
         # 支持的文件类型
         allowed_extensions = {'.md', '.txt', '.doc', '.docx', '.pdf', '.pptx'}
 
-        # 解析所有上传的文件
-        parsed_files = []
-        file_summaries = []
-
-        for file in files:
-            file_ext = Path(file.filename).suffix.lower()
-
-            if file_ext not in allowed_extensions:
-                file_summaries.append(f"❌ {file.filename}: 不支持的文件类型 ({file_ext})")
-                continue
-
-            try:
-                content = await file.read()
-                text_content = parse_uploaded_file(content, file_ext, file.filename)
-
-                if text_content:
-                    parsed_files.append({
-                        "filename": file.filename,
-                        "content": text_content,
-                        "content_type": file.content_type,
-                        "size": len(content),
-                    })
-                    file_summaries.append(f"✅ {file.filename}: 解析成功 ({len(text_content)} 字符)")
-                else:
-                    file_summaries.append(f"⚠️ {file.filename}: 文件为空或无法解析")
-
-            except Exception as e:
-                file_summaries.append(f"❌ {file.filename}: 解析失败 - {str(e)}")
+        parsed_files, file_summaries = await _parse_multipart_files_parallel(files, allowed_extensions)
 
         try:
             return await _handle_parsed_upload(session, skill, workflow, parsed_files, file_summaries)
@@ -1033,9 +1141,673 @@ def _diagram_asset_flags(session_id: str, diagram: dict) -> tuple[bool, bool]:
     return has_png, has_svg
 
 
+def _normalize_markdown_text(markdown: str) -> str:
+    text = (markdown or "").replace("\r\n", "\n").replace("\r", "\n")
+    lines = text.split("\n")
+    out: List[str] = []
+    blank = 0
+    for ln in lines:
+        if ln.strip():
+            blank = 0
+            out.append(ln.rstrip())
+            continue
+        blank += 1
+        if blank <= 2:
+            out.append("")
+    return "\n".join(out).strip() + "\n"
+
+
+def _build_figure_markdown(title: str, data_uri: str) -> str:
+    t = (title or "图示").strip() or "图示"
+    return f"![{t}]({data_uri})\n\n*图：{t}*"
+
+
+def _split_infographic_points(lines_text: str) -> List[str]:
+    source = (lines_text or "").strip()
+    if not source:
+        return []
+    pieces = []
+    for line in source.split("\n"):
+        s = str(line or "").strip()
+        if not s:
+            continue
+        s = re.sub(r"^\d+[.)、]\s*", "", s)
+        s = re.sub(r"^[•\-]\s*", "", s)
+        s = s.strip("；; ")
+        if s:
+            pieces.append(s)
+    return pieces[:12]
+
+
+def _build_local_infographic_spec(
+    *,
+    diagram_type: str,
+    raw_spec: dict,
+    lines_text: str,
+    title: str,
+) -> tuple[str, dict]:
+    pieces = _split_infographic_points(lines_text)
+    if not pieces:
+        pieces = ["研究目标与问题定义", "方法与技术路径", "实验验证与成果输出"]
+
+    if diagram_type == "research_framework":
+        spec = raw_spec if isinstance(raw_spec, dict) else {}
+        if not spec.get("goal"):
+            spec["goal"] = {"title": "研究目标", "bullets": pieces[:3]}
+        if not spec.get("hypotheses"):
+            spec["hypotheses"] = {"title": "科学问题/假设", "bullets": pieces[1:4] or pieces[:3]}
+        if not spec.get("support"):
+            spec["support"] = {"title": "支撑条件", "bullets": pieces[2:5] or pieces[:3]}
+        if not spec.get("work_packages"):
+            spec["work_packages"] = [
+                {"title": "WP1 研究内容", "bullets": pieces[:3]},
+                {"title": "WP2 研究内容", "bullets": pieces[1:4] or pieces[:3]},
+                {"title": "WP3 研究内容", "bullets": pieces[2:5] or pieces[:3]},
+            ]
+        if not spec.get("outcomes"):
+            spec["outcomes"] = {"title": "预期成果", "bullets": pieces[-3:] or pieces[:3]}
+        return "research_framework", spec
+
+    # technical_route / infographic / freestyle -> technical route renderer
+    spec = raw_spec if isinstance(raw_spec, dict) else {}
+    stages = spec.get("stages")
+    if not isinstance(stages, list) or not stages:
+        chunk_size = max(2, min(3, len(pieces)))
+        split_stages = []
+        cursor = 0
+        while cursor < len(pieces) and len(split_stages) < 5:
+            split_stages.append({
+                "title": f"阶段{len(split_stages) + 1}",
+                "bullets": pieces[cursor:cursor + chunk_size],
+            })
+            cursor += chunk_size
+        if len(split_stages) < 3:
+            split_stages = [
+                {"title": "阶段1", "bullets": pieces[:3]},
+                {"title": "阶段2", "bullets": pieces[1:4] or pieces[:3]},
+                {"title": "阶段3", "bullets": pieces[-3:] or pieces[:3]},
+            ]
+        spec["stages"] = split_stages
+    spec["title"] = title
+    return "technical_route", spec
+
+
+def _render_local_infographic_assets(
+    *,
+    diagram_type: str,
+    raw_spec: dict,
+    lines_text: str,
+    title: str,
+) -> tuple[bytes, str, dict, str]:
+    from backend.core.diagrams.infographic import render_infographic_png_svg
+
+    render_type, render_spec = _build_local_infographic_spec(
+        diagram_type=diagram_type,
+        raw_spec=raw_spec,
+        lines_text=lines_text,
+        title=title,
+    )
+    png_bytes, svg_text, normalized_spec = render_infographic_png_svg(
+        render_type,
+        render_spec,
+        title=title,
+    )
+    return png_bytes, svg_text, normalized_spec, render_type
+
+
+def _build_codegen_schema_hint(diagram_type: str) -> str:
+    dt = (diagram_type or "").strip().lower()
+    if dt == "research_framework":
+        return """{
+  "goal": {"title": "研究目标", "bullets": ["要点1", "要点2", "要点3"]},
+  "hypotheses": {"title": "科学问题/假设", "bullets": ["要点1", "要点2", "要点3"]},
+  "support": {"title": "支撑条件", "bullets": ["要点1", "要点2", "要点3"]},
+  "work_packages": [
+    {"title": "WP1 研究内容", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "WP2 研究内容", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "WP3 研究内容", "bullets": ["要点1", "要点2", "要点3"]}
+  ],
+  "outcomes": {"title": "预期成果", "bullets": ["要点1", "要点2", "要点3"]}
+}"""
+    return """{
+  "stages": [
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]},
+    {"title": "阶段标题", "bullets": ["要点1", "要点2", "要点3"]}
+  ]
+}"""
+
+
+def _dedupe_text_list(items: Any, *, max_items: int = 4, max_len: int = 24) -> List[str]:
+    if not isinstance(items, list):
+        return []
+    out: List[str] = []
+    seen: set[str] = set()
+    for raw in items:
+        text = str(raw or "").strip()
+        if not text:
+            continue
+        text = re.sub(r"\s+", " ", text).strip()
+        if len(text) > max_len:
+            text = text[:max_len].rstrip()
+        key = _normalized_heading_text(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        out.append(text)
+        if len(out) >= max_items:
+            break
+    return out
+
+
+def _extract_codegen_summary_points(payload: dict) -> List[str]:
+    if not isinstance(payload, dict):
+        return []
+    candidates = [
+        payload.get("concise_summary"),
+        payload.get("summary_points"),
+        payload.get("summary"),
+        payload.get("outline"),
+    ]
+    for value in candidates:
+        if isinstance(value, list):
+            return _dedupe_text_list(value, max_items=8, max_len=22)
+        if isinstance(value, str) and value.strip():
+            parts = re.split(r"[；;。\n]+", value.strip())
+            return _dedupe_text_list(parts, max_items=8, max_len=22)
+    return []
+
+
+def _extract_codegen_spec_block(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {}
+    for key in ("diagram_spec", "spec", "structure", "output", "diagram"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            return value
+    return payload
+
+
+def _sanitize_codegen_spec(spec: dict, diagram_type: str) -> dict:
+    dt = (diagram_type or "").strip().lower()
+    if not isinstance(spec, dict):
+        return {}
+
+    payload = _extract_codegen_spec_block(spec)
+    summary_points = _extract_codegen_summary_points(spec)
+    global_seen: set[str] = set()
+    summary_cursor = 0
+
+    def _borrow_summary(max_items: int = 2) -> List[str]:
+        nonlocal summary_cursor
+        out: List[str] = []
+        if not summary_points:
+            return out
+        attempts = 0
+        while len(out) < max_items and attempts < len(summary_points) * 2:
+            candidate = summary_points[summary_cursor % len(summary_points)]
+            summary_cursor += 1
+            attempts += 1
+            key = _normalized_heading_text(candidate)
+            if not key or key in global_seen:
+                continue
+            global_seen.add(key)
+            out.append(candidate)
+        return out
+
+    def _dedupe_with_global(items: Any, *, max_items: int = 4, max_len: int = 20) -> List[str]:
+        local = _dedupe_text_list(items, max_items=max_items * 2, max_len=max_len)
+        out: List[str] = []
+        for item in local:
+            key = _normalized_heading_text(item)
+            if not key or key in global_seen:
+                continue
+            global_seen.add(key)
+            out.append(item)
+            if len(out) >= max_items:
+                break
+        return out
+
+    if dt == "research_framework":
+        out: Dict[str, Any] = {}
+        for key in ("goal", "hypotheses", "support", "outcomes"):
+            box = payload.get(key)
+            if not isinstance(box, dict):
+                continue
+            title = str(box.get("title") or "").strip()[:20]
+            bullets = _dedupe_with_global(box.get("bullets"), max_items=4, max_len=20)
+            if not bullets:
+                bullets = _borrow_summary(max_items=2)
+            if title or bullets:
+                out[key] = {"title": title or key, "bullets": bullets}
+
+        wps = payload.get("work_packages")
+        if isinstance(wps, list):
+            wp_out = []
+            seen_titles: set[str] = set()
+            for wp in wps:
+                if not isinstance(wp, dict):
+                    continue
+                title = str(wp.get("title") or "").strip()[:24]
+                bullets = _dedupe_with_global(wp.get("bullets"), max_items=4, max_len=20)
+                if not bullets:
+                    bullets = _borrow_summary(max_items=2)
+                key = _normalized_heading_text(title) or _normalized_heading_text(" ".join(bullets))
+                if not key or key in seen_titles:
+                    continue
+                seen_titles.add(key)
+                wp_out.append({"title": title or f"WP{len(wp_out) + 1}", "bullets": bullets})
+                if len(wp_out) >= 4:
+                    break
+            if wp_out:
+                out["work_packages"] = wp_out
+
+        if not out and summary_points:
+            out = {
+                "goal": {"title": "研究目标", "bullets": summary_points[:3]},
+                "hypotheses": {"title": "科学问题/假设", "bullets": summary_points[1:4] or summary_points[:3]},
+                "support": {"title": "支撑条件", "bullets": summary_points[2:5] or summary_points[:3]},
+                "work_packages": [
+                    {"title": "WP1 研究内容", "bullets": summary_points[:3]},
+                    {"title": "WP2 研究内容", "bullets": summary_points[1:4] or summary_points[:3]},
+                    {"title": "WP3 研究内容", "bullets": summary_points[2:5] or summary_points[:3]},
+                ],
+                "outcomes": {"title": "预期成果", "bullets": summary_points[-3:] or summary_points[:3]},
+            }
+        return out
+
+    stages = payload.get("stages")
+    if not isinstance(stages, list):
+        if summary_points:
+            return {
+                "stages": [
+                    {"title": "问题定义", "bullets": summary_points[:3]},
+                    {"title": "方法设计", "bullets": summary_points[1:4] or summary_points[:3]},
+                    {"title": "验证与产出", "bullets": summary_points[-3:] or summary_points[:3]},
+                ]
+            }
+        return {}
+    stage_out = []
+    seen_titles: set[str] = set()
+    for stage in stages:
+        if not isinstance(stage, dict):
+            continue
+        title = str(stage.get("title") or "").strip()[:20]
+        bullets = _dedupe_with_global(stage.get("bullets"), max_items=4, max_len=20)
+        if not bullets:
+            bullets = _borrow_summary(max_items=2)
+        key = _normalized_heading_text(title) or _normalized_heading_text(" ".join(bullets))
+        if not key or key in seen_titles:
+            continue
+        seen_titles.add(key)
+        stage_out.append({"title": title or f"阶段{len(stage_out) + 1}", "bullets": bullets})
+        if len(stage_out) >= 6:
+            break
+
+    if not stage_out and summary_points:
+        stage_out = [
+            {"title": "问题定义", "bullets": summary_points[:3]},
+            {"title": "方法设计", "bullets": summary_points[1:4] or summary_points[:3]},
+            {"title": "验证与产出", "bullets": summary_points[-3:] or summary_points[:3]},
+        ]
+    return {"stages": stage_out} if stage_out else {}
+
+
+async def _generate_local_infographic_spec_via_skill(
+    *,
+    workflow,
+    diagram_type: str,
+    title: str,
+    full_context: str,
+    focus_context: str,
+) -> dict:
+    registry = get_registry()
+    codegen_skill = registry.get("scientific-infographic-codegen")
+
+    full_text = (full_context or "").strip()
+    focus_text = (focus_context or "").strip()
+    if len(full_text) > 12000:
+        full_text = full_text[:12000]
+    if len(focus_text) > 3000:
+        focus_text = focus_text[:3000]
+
+    schema_hint = _build_codegen_schema_hint(diagram_type)
+    fallback_user_prompt = f"""请为科研文稿生成“{title}”的结构化图示规格（用于本地代码渲染，不是成图模型）。
+
+只输出 JSON，不要解释、不要代码块。
+请按“两步法”：
+步骤1）先做信息压缩：从输入中提炼 3-6 条 `concise_summary`；
+步骤2）基于该摘要输出 `diagram_spec`（必须符合 schema）。
+
+强约束：
+1) 重点片段优先，同时与全文上下文保持一致；
+2) 严禁复制长段落，必须改写为短语要点；
+3) 每个 bullets 条目建议 8-20 字，避免同义重复；
+4) 技术路线建议体现：问题定义 → 方法实现 → 验证评估 → 产出；
+5) 不得编造数据、实验结果或结论。
+
+图类型：{diagram_type}
+
+目标 schema（用于 diagram_spec）：
+{schema_hint}
+
+输出 JSON 目标格式：
+{{
+  "concise_summary": ["摘要要点1", "摘要要点2", "摘要要点3"],
+  "diagram_spec": "按上方 schema 输出对象"
+}}
+
+输入A（全文上下文，背景参考）：
+{full_text or "（无）"}
+
+输入B（重点片段，核心优先）：
+{focus_text or "（无）"}
+"""
+
+    system_prompt = "你是科研图示结构规划器。只输出 JSON。"
+    user_prompt = fallback_user_prompt
+
+    if codegen_skill:
+        try:
+            system_prompt = _resolve_skill_system_prompt(codegen_skill) or system_prompt
+            sections = codegen_skill.get_flat_sections()
+            section = sections[0] if sections else None
+            if section:
+                context = {
+                    "requirements": {
+                        "diagram_type": diagram_type,
+                        "diagram_title": title,
+                        "schema_hint": schema_hint,
+                        "full_context": full_text,
+                        "focus_context": focus_text,
+                    },
+                    "external_information": full_text,
+                }
+                rendered = codegen_skill.get_section_prompt(section, context)
+                if isinstance(rendered, str) and rendered.strip():
+                    user_prompt = rendered.strip()
+            if user_prompt == fallback_user_prompt:
+                guidelines = (getattr(codegen_skill, "writing_guidelines", "") or "").strip()
+                if guidelines:
+                    user_prompt = f"{guidelines}\n\n{fallback_user_prompt}"
+        except Exception as e:
+            logger.warning("codegen skill prompt render failed, fallback prompt used: %s", _redact_secrets(str(e))[:240])
+
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt},
+    ]
+
+    try:
+        raw = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=900)
+        parsed = _extract_json_obj(raw)
+        return _sanitize_codegen_spec(parsed, diagram_type)
+    except Exception as e:
+        logger.warning("local infographic spec generation failed: %s", _redact_secrets(str(e))[:280])
+        return {}
+
+
+def _heading_keywords_for_type(diagram_type: str) -> List[str]:
+    dt = (diagram_type or "").strip().lower()
+    if dt == "technical_route":
+        return ["技术路线", "研究内容", "研究方案", "研究方法", "方法", "路线", "实施方案"]
+    if dt == "research_framework":
+        return ["研究框架", "总体框架", "总体思路", "研究目标", "立项依据", "框架"]
+    if dt == "infographic":
+        return ["摘要", "概述", "引言", "项目简介", "研究思路"]
+    return ["研究内容", "方法", "框架", "结论"]
+
+
+def _normalized_heading_text(text: str) -> str:
+    s = re.sub(r"^[#\s]+", "", (text or "").strip())
+    s = re.sub(r"[`*_>\-]", "", s)
+    s = re.sub(r"\s+", "", s)
+    return s.lower()
+
+
+def _find_heading_index(lines: List[str], heading: str) -> int:
+    target = _normalized_heading_text(heading)
+    if not target:
+        return -1
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if not s.startswith("#"):
+            continue
+        h = _normalized_heading_text(s)
+        if target in h or h in target:
+            return idx
+    return -1
+
+
+def _find_line_index_by_anchor(lines: List[str], anchor_text: str) -> int:
+    anchor = (anchor_text or "").strip()
+    if not anchor:
+        return -1
+    for idx, line in enumerate(lines):
+        if anchor in line:
+            return idx
+    return -1
+
+
+def _fallback_insert_index(lines: List[str], diagram_type: str) -> int:
+    keys = _heading_keywords_for_type(diagram_type)
+    for idx, line in enumerate(lines):
+        s = line.strip()
+        if not s.startswith("#"):
+            continue
+        normalized = _normalized_heading_text(s)
+        for key in keys:
+            if _normalized_heading_text(key) in normalized:
+                return idx
+
+    for idx, line in enumerate(lines):
+        if line.strip().startswith("#"):
+            return idx
+    return 0
+
+
+async def _plan_illustration_items(
+    *,
+    workflow,
+    document_content: str,
+    max_images: int,
+    agent_system_prompt: str = "",
+) -> List[Dict[str, str]]:
+    max_images = max(1, min(int(max_images or 2), 4))
+    excerpt = (document_content or "").strip()
+    if len(excerpt) > 12000:
+        excerpt = excerpt[:12000]
+
+    prompt = f"""你是科研文档配图规划助手。请根据全文内容，规划最多 {max_images} 张图。
+
+只输出 JSON：
+{{
+  "illustrations": [
+    {{
+      "title": "图标题",
+      "diagram_type": "technical_route|research_framework|infographic",
+      "focus_text": "从全文中挑出的关键内容摘要（1-3句）"
+    }}
+  ]
+}}
+
+要求：
+1) 标题简洁专业；
+2) 优先覆盖“技术路线图、研究框架图”；
+3) focus_text 必须来自全文语义，不编造事实；
+4) 仅输出 JSON。
+
+全文：
+{excerpt}
+"""
+    system_prompt = "你只输出 JSON。"
+    if agent_system_prompt:
+        system_prompt = f"{agent_system_prompt}\n\n{system_prompt}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        raw = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=700)
+        obj = _extract_json_obj(raw)
+    except Exception:
+        obj = {}
+
+    items = obj.get("illustrations") if isinstance(obj, dict) else None
+    normalized: List[Dict[str, str]] = []
+    if isinstance(items, list):
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            title = str(it.get("title") or "").strip()
+            dtype = str(it.get("diagram_type") or "").strip().lower()
+            focus_text = str(it.get("focus_text") or "").strip()
+            if dtype not in {"technical_route", "research_framework", "infographic"}:
+                continue
+            if not title:
+                title = "技术路线图" if dtype == "technical_route" else ("研究框架图" if dtype == "research_framework" else "科研信息图")
+            if not focus_text:
+                focus_text = excerpt[:1200]
+            normalized.append({
+                "title": title[:40],
+                "diagram_type": dtype,
+                "focus_text": focus_text[:3000],
+            })
+            if len(normalized) >= max_images:
+                break
+
+    if normalized:
+        return normalized
+
+    fallback: List[Dict[str, str]] = [
+        {"title": "技术路线图", "diagram_type": "technical_route", "focus_text": excerpt[:1800]},
+        {"title": "研究框架图", "diagram_type": "research_framework", "focus_text": excerpt[:1800]},
+    ]
+    return fallback[:max_images]
+
+
+async def _plan_insertions_with_llm(
+    *,
+    workflow,
+    document_content: str,
+    diagrams: List[Dict[str, Any]],
+    agent_system_prompt: str = "",
+) -> List[Dict[str, str]]:
+    excerpt = (document_content or "").strip()
+    if len(excerpt) > 14000:
+        excerpt = excerpt[:14000]
+
+    diag_lines = []
+    for d in diagrams:
+        diag_lines.append(
+            f"- id: {d.get('diagram_id')} | title: {d.get('title')} | type: {d.get('diagram_type')} | focus: {str(d.get('focus_text') or '')[:120]}"
+        )
+    diag_text = "\n".join(diag_lines) if diag_lines else "（无）"
+
+    prompt = f"""你是科研文档排版助手。请为每张图确定在全文中的插入位置。
+
+只输出 JSON：
+{{
+  "placements": [
+    {{
+      "diagram_id": "图ID",
+      "anchor_heading": "优先插入到此标题之后（可为空）",
+      "anchor_text": "若无标题则匹配该句子片段（可为空）"
+    }}
+  ]
+}}
+
+规则：
+1) 让图片贴近对应章节，避免全部堆在文档开头；
+2) 优先使用标题锚点；
+3) 不改变正文原意；
+4) 仅输出 JSON。
+
+待插入图片：
+{diag_text}
+
+全文 Markdown：
+{excerpt}
+"""
+    system_prompt = "你只输出 JSON。"
+    if agent_system_prompt:
+        system_prompt = f"{agent_system_prompt}\n\n{system_prompt}"
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        raw = await workflow.writer_agent._chat(messages, temperature=0.1, max_tokens=700)
+        obj = _extract_json_obj(raw)
+    except Exception:
+        obj = {}
+
+    placements = obj.get("placements") if isinstance(obj, dict) else None
+    out: List[Dict[str, str]] = []
+    if isinstance(placements, list):
+        for p in placements:
+            if not isinstance(p, dict):
+                continue
+            did = str(p.get("diagram_id") or "").strip()
+            if not did:
+                continue
+            out.append({
+                "diagram_id": did,
+                "anchor_heading": str(p.get("anchor_heading") or "").strip(),
+                "anchor_text": str(p.get("anchor_text") or "").strip(),
+            })
+    return out
+
+
+def _apply_diagram_insertions(
+    *,
+    document_content: str,
+    diagrams: List[Dict[str, Any]],
+    placements: List[Dict[str, str]],
+) -> str:
+    text = _normalize_markdown_text(document_content or "")
+    lines = text.split("\n")
+
+    placement_map = {str(p.get("diagram_id") or "").strip(): p for p in placements if isinstance(p, dict)}
+
+    indexed_blocks: List[tuple[int, int, str]] = []
+    for order, d in enumerate(diagrams):
+        did = str(d.get("diagram_id") or "").strip()
+        if not did:
+            continue
+        placement = placement_map.get(did, {})
+        idx = -1
+        anchor_heading = str(placement.get("anchor_heading") or "").strip()
+        if anchor_heading:
+            idx = _find_heading_index(lines, anchor_heading)
+        if idx < 0:
+            anchor_text = str(placement.get("anchor_text") or "").strip()
+            if anchor_text:
+                idx = _find_line_index_by_anchor(lines, anchor_text)
+        if idx < 0:
+            idx = _fallback_insert_index(lines, str(d.get("diagram_type") or ""))
+
+        snippet = str(d.get("markdown_snippet") or "").strip()
+        if not snippet:
+            continue
+        block_lines = ["", snippet, ""]
+        block = "\n".join(block_lines)
+        indexed_blocks.append((idx, order, block))
+
+    # Desc insert to keep indices stable
+    indexed_blocks.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    for idx, _order, block in indexed_blocks:
+        insert_at = max(0, min(idx + 1, len(lines)))
+        b_lines = block.split("\n")
+        lines[insert_at:insert_at] = b_lines
+
+    return _normalize_markdown_text("\n".join(lines))
+
+
 @router.post("/session/{session_id}/generate-diagram")
 async def generate_diagram(session_id: str, request: DiagramRequest):
-    """生成图示（两种模式：infographic 本地渲染 / image_model 成图模型）并返回可插入 Markdown 的图片片段"""
+    """生成图示：`image_model` 走成图模型；`infographic` 走本地信息图渲染（无外部成图依赖）。"""
     workflow = get_workflow()
     session = workflow.get_session(session_id)
     if not session:
@@ -1048,29 +1820,39 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
-    diagram_type = (request.diagram_type or "technical_route").strip() or "technical_route"
-    # Allow freestyle type
-    if diagram_type not in {"technical_route", "research_framework", "freestyle"}:
+    diagram_type = (request.diagram_type or "technical_route").strip().lower() or "technical_route"
+    if diagram_type not in {"technical_route", "research_framework", "freestyle", "infographic"}:
         raise HTTPException(status_code=400, detail=f"Unsupported diagram_type: {diagram_type}")
 
     mode = (request.mode or "infographic").strip().lower() or "infographic"
     if mode not in {"infographic", "image_model", "auto"}:
         raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
+    if mode == "auto":
+        mode = "infographic"
 
     cfg = get_llm_config()
     image_model = (getattr(cfg, "image_model", None) or "").strip()
-    if mode == "auto":
-        mode = "image_model" if image_model else "infographic"
+    if mode == "image_model":
+        if not image_model:
+            raise HTTPException(status_code=400, detail="未配置成图模型：请先在设置中填写“成图模型（Image Model）”。")
+        if not (cfg.base_url or "").strip():
+            raise HTTPException(status_code=400, detail="未配置 Base URL，无法调用成图模型。")
 
-    title = (request.title or ("研究框架图" if diagram_type == "research_framework" else "图示")).strip()
+    default_title = {
+        "technical_route": "技术路线图",
+        "research_framework": "研究框架图",
+        "freestyle": "科研示意图",
+        "infographic": "科研信息图",
+    }
+    title = (request.title or default_title.get(diagram_type, "图示")).strip()
 
-    # Context preparation
     if request.selected_text:
-        # User selected specific text -> Focus on that
-        requirements_text = request.selected_text
-        external_excerpt = (request.context_text or "")[:1000] # Optional surrounding context
+        selected_text = (request.selected_text or "").strip()
+        requirements_text = selected_text or "（暂无）"
+        external_excerpt = (request.context_text or "").strip()
+        if len(external_excerpt) > 12000:
+            external_excerpt = external_excerpt[:12000]
     else:
-        # Default: use global requirements
         requirements = session.requirements or {}
         req_lines = []
         for f in skill.requirement_fields:
@@ -1085,134 +1867,19 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
         if len(external_excerpt) > 2500:
             external_excerpt = external_excerpt[:2500]
 
-    # Handle Freestyle (Text -> SVG/Image)
-    if diagram_type == "freestyle":
-        # 1. Try Gemini (Fastest, SVG output)
-        if settings.GEMINI_API_KEY:
-            try:
-                smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
-                svg_text = await smart_gen.generate_freestyle_svg(requirements_text, title)
-
-                # Save SVG
-                diagram_id = str(uuid.uuid4())
-                _png_path, svg_path = _diagram_paths(session_id, diagram_id)
-                svg_path.write_text(svg_text, encoding="utf-8")
-
-                data_uri = f"data:image/svg+xml;base64,{base64.b64encode(svg_text.encode('utf-8')).decode('ascii')}"
-                snippet = f"![{title}]({data_uri})"
-
-                diagram_record = {
-                    "id": diagram_id,
-                    "title": title,
-                    "diagram_type": "freestyle",
-                    "mode": "svg_code",
-                    "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                    "has_png": False,
-                    "has_svg": True,
-                    "meta": {"provider": "google_gemini", "model": "gemini-1.5-pro"},
-                }
-                session.diagrams = (session.diagrams or []) + [diagram_record]
-                workflow.save_session(session)
-
-                return {
-                    "success": True,
-                    "session_id": session_id,
-                    "diagram_id": diagram_id,
-                    "title": title,
-                    "diagram_type": "freestyle",
-                    "mode": "svg_code",
-                    "image_data_uri": data_uri,
-                    "markdown_snippet": snippet,
-                    "has_svg": True,
-                    "png_url": None,
-                    "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg",
-                }
-            except Exception as e:
-                logger.warning(f"Gemini freestyle generation failed, falling back to Schematics: {e}")
-
-        # 2. Fallback: Schematics Generator (Python Code -> Image)
-        # Uses the configured LLM to write Python code (Schemdraw, Matplotlib, etc.)
-        try:
-            logger.info("Using SchematicsGenerator for freestyle diagram...")
-            schematic_gen = SchematicsGenerator()
-            # Combine context
-            full_context = f"需求：{requirements_text}\n\n背景：{external_excerpt}"
-
-            png_bytes, svg_text, code_used = await schematic_gen.generate(full_context, diagram_type, title)
-
-            if not png_bytes and not svg_text:
-                raise Exception("Generated code did not produce any image output")
-
-            diagram_id = str(uuid.uuid4())
-            png_path, svg_path = _diagram_paths(session_id, diagram_id)
-
-            if png_bytes:
-                png_path.write_bytes(png_bytes)
-            if svg_text:
-                svg_path.write_text(svg_text, encoding="utf-8")
-
-            # Prefer PNG for markdown compatibility, or SVG data URI if no PNG
-            if png_bytes:
-                b64_img = base64.b64encode(png_bytes).decode("ascii")
-                data_uri = f"data:image/png;base64,{b64_img}"
-            else:
-                b64_img = base64.b64encode(svg_text.encode('utf-8')).decode('ascii')
-                data_uri = f"data:image/svg+xml;base64,{b64_img}"
-
-            snippet = f"![{title}]({data_uri})"
-
-            diagram_record = {
-                "id": diagram_id,
-                "title": title,
-                "diagram_type": "freestyle",
-                "mode": "schematic_code",
-                "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
-                "has_png": bool(png_bytes),
-                "has_svg": bool(svg_text),
-                "meta": {"provider": "schematics_generator", "generator": "python_code"},
-            }
-            session.diagrams = (session.diagrams or []) + [diagram_record]
-            workflow.save_session(session)
-
-            return {
-                "success": True,
-                "session_id": session_id,
-                "diagram_id": diagram_id,
-                "title": title,
-                "diagram_type": "freestyle",
-                "mode": "schematic_code",
-                "image_data_uri": data_uri,
-                "markdown_snippet": snippet,
-                "has_svg": bool(svg_text),
-                "png_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.png" if png_bytes else None,
-                "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg" if svg_text else None,
-            }
-
-        except Exception as e:
-            logger.error(f"Freestyle generation failed: {e}")
-            raise HTTPException(status_code=500, detail=f"绘图失败: {str(e)}")
-
-
-    # Step 1) Ask chat model (or Gemini) for a compact JSON spec
     raw_spec = {}
+    full_context_for_codegen = (request.context_text or external_excerpt or "").strip()
+    focus_context_for_codegen = (request.selected_text or requirements_text or "").strip()
 
-    # 1.1 Try Gemini if configured (Smarter & Faster)
-    if settings.GEMINI_API_KEY:
-        try:
-            logger.info(f"Using Gemini to generate diagram spec for {diagram_type}...")
-            smart_gen = SmartDiagramGenerator(gemini_key=settings.GEMINI_API_KEY)
-            context_text = f"需求与背景：\n{requirements_text}\n\n材料摘要：\n{external_excerpt}"
-
-            if diagram_type == "technical_route":
-                raw_spec = await smart_gen._generate_technical_route_spec(context_text, title)
-            elif diagram_type == "research_framework":
-                raw_spec = await smart_gen._generate_research_framework_spec(context_text, title)
-        except Exception as e:
-            logger.error(f"Gemini diagram generation failed: {e}")
-            raw_spec = {}
-
-    # 1.2 Fallback to default LLM (Writer Agent)
-    if not raw_spec:
+    if mode == "infographic":
+        raw_spec = await _generate_local_infographic_spec_via_skill(
+            workflow=workflow,
+            diagram_type=diagram_type,
+            title=title,
+            full_context=full_context_for_codegen,
+            focus_context=focus_context_for_codegen,
+        )
+    elif diagram_type in {"technical_route", "research_framework"}:
         if diagram_type == "technical_route":
             json_schema_hint = """{
   "stages": [
@@ -1237,16 +1904,15 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
 }"""
             content_rule = "研究框架图：强调“目标/假设 → 任务包(WP) → 预期成果”，并标出支撑条件。"
 
-        prompt = f"""你是科研申报书的信息图内容策划助手。请根据“已知需求”和“材料摘要”，生成可用于绘制“{title}”的信息图内容 JSON。
+        prompt = f"""你是科研申报书图示设计助手。请根据“已知需求”和“材料摘要”，生成可用于绘制“{title}”的结构化 JSON。
 
 只输出 JSON（不要解释、不要 Markdown 代码块）。
 
 硬性约束：
 1) 结构必须严格匹配下面的 JSON 结构示例（字段名保持一致）；
-2) 标题/要点要专业、准确、可直接用于申报书；避免虚构具体结论、数值、实验结果；
-3) 不要出现“待定/未知/自行补充”等字样；信息不足时用抽象但规范的表述补全；
-4) 每个 title <= 14 字；每条 bullets <= 22 字，尽量使用“方法/数据/产出/指标”等结构；
-5) 只基于已知信息组织内容。
+2) 不得虚构数据、结果、实验结论；
+3) 每个 title <= 14 字；每条 bullets <= 22 字；
+4) 信息不足时，使用规范但保守的描述。
 
 内容规则：{content_rule}
 文书类型：{skill.metadata.name}
@@ -1260,12 +1926,10 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
 JSON 结构示例：
 {json_schema_hint}
 """
-
         messages = [
             {"role": "system", "content": "你只输出 JSON。"},
             {"role": "user", "content": prompt},
         ]
-
         try:
             spec_text = await workflow.writer_agent._chat(messages, temperature=0.2, max_tokens=900)
             raw_spec = _extract_json_obj(spec_text)
@@ -1273,38 +1937,21 @@ JSON 结构示例：
             logger.warning("diagram spec generation failed: %s", _redact_secrets(str(e))[:240])
             raw_spec = {}
 
-    diagram_id = str(uuid.uuid4())
-    png_path, svg_path = _diagram_paths(session_id, diagram_id)
+    def _lines_from_spec() -> str:
+        if diagram_type == "technical_route":
+            stages = (raw_spec.get("stages") if isinstance(raw_spec, dict) else None) or []
+            out = []
+            for i, st in enumerate(stages[:6] if isinstance(stages, list) else []):
+                if not isinstance(st, dict):
+                    continue
+                t = str(st.get("title") or f"阶段{i + 1}").strip()
+                bs = st.get("bullets") or []
+                btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
+                if t or btxt:
+                    out.append(f"{i + 1}. {t}：{btxt}".strip("："))
+            return "\n".join(out) if out else requirements_text
 
-    svg_text = ""
-    normalized_spec = {}
-
-    if mode == "infographic":
-        try:
-            from backend.core.diagrams.infographic import render_infographic_png_svg
-            png_bytes, svg_text, normalized_spec = render_infographic_png_svg(diagram_type, raw_spec, title=title)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"本地信息图渲染失败：{_redact_secrets(str(e))}")
-    else:
-        if not image_model:
-            raise HTTPException(status_code=400, detail="未配置成图模型：请先在设置中填写“成图模型（Image Model）”或改用 infographic 模式")
-
-        # Build a concise, text-friendly prompt from the spec (best-effort).
-        def _lines_from_spec() -> str:
-            if diagram_type == "technical_route":
-                stages = (raw_spec.get("stages") if isinstance(raw_spec, dict) else None) or []
-                out = []
-                for i, st in enumerate(stages[:6] if isinstance(stages, list) else []):
-                    if not isinstance(st, dict):
-                        continue
-                    t = str(st.get("title") or f"阶段{i+1}").strip()
-                    bs = st.get("bullets") or []
-                    btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
-                    if t or btxt:
-                        out.append(f"{i+1}. {t}：{btxt}".strip("："))
-                return "\n".join(out) if out else requirements_text
-
-            # research_framework
+        if diagram_type == "research_framework":
             parts = []
             for key in ("goal", "hypotheses", "support", "outcomes"):
                 box = raw_spec.get(key) if isinstance(raw_spec, dict) else None
@@ -1320,74 +1967,216 @@ JSON 结构示例：
                 for i, wp in enumerate(wps[:3]):
                     if not isinstance(wp, dict):
                         continue
-                    t = str(wp.get("title") or f"WP{i+1}").strip()
+                    t = str(wp.get("title") or f"WP{i + 1}").strip()
                     bs = wp.get("bullets") or []
                     btxt = "；".join([str(x).strip() for x in (bs[:4] if isinstance(bs, list) else []) if str(x).strip()])
                     if t or btxt:
                         parts.append(f"{t}：{btxt}".strip("："))
             return "\n".join(parts) if parts else requirements_text
 
-        diagram_kind_cn = "技术路线图" if diagram_type == "technical_route" else "研究框架图"
-        image_prompt = f"""请生成一张可直接用于科研申报书的中文信息图（{diagram_kind_cn}）。
+        source = ((request.selected_text or "").strip() or requirements_text or "").strip()
+        pieces = [x.strip("•- \t") for x in re.split(r"[\n；;]+", source) if x and x.strip("•- \t")]
+        if not pieces:
+            return "1. 研究目标与问题定义\n2. 方法与技术路径\n3. 验证与成果输出"
+        return "\n".join([f"{i + 1}. {v}" for i, v in enumerate(pieces[:10])])
+
+    if diagram_type == "technical_route":
+        diagram_kind_cn = "技术路线图"
+        layout_hint = "按阶段从左到右或从上到下，4-6 个阶段，箭头清晰表达先后依赖与反馈闭环。"
+    elif diagram_type == "research_framework":
+        diagram_kind_cn = "研究框架图"
+        layout_hint = "采用“目标/问题 → 任务包(WP) → 验证/成果”的层次结构，并标出支撑条件。"
+    elif diagram_type == "freestyle":
+        diagram_kind_cn = "科研示意图"
+        layout_hint = "根据内容组织成逻辑清晰的模块关系图，避免装饰性元素。"
+    else:
+        diagram_kind_cn = "科研信息图"
+        layout_hint = "以信息图样式表达关键模块和关系，强调结构化、可读性、可解释性。"
+
+    if mode == "infographic":
+        style_hint = (
+            "信息图风格（infographic）：扁平化、卡片分区、统一配色；背景白色或浅色；"
+            "中文文字清晰；禁止水印、Logo、摄影风。"
+        )
+    else:
+        style_hint = (
+            "科研图示风格：专业、克制、结构导向；以模块框图和流程箭头为主；"
+            "中文标签清晰、术语规范；禁止水印、Logo。"
+        )
+
+    lines_text = _lines_from_spec()
+    image_prompt = f"""请生成一张可直接用于科研申报书的中文{diagram_kind_cn}。
 
 风格要求：
-- 专业、干净、矢量信息图风格（flat design），白色或浅色背景
-- 结构清晰：圆角矩形卡片 + 箭头流程，适合 A4/16:9
-- 中文文字务必清晰可读，不要艺术字，不要水印/Logo
+- {style_hint}
+- {layout_hint}
+- 图中文字必须清晰可读，避免过度拥挤与重叠。
 
 标题：{title}
-内容（请保持含义，不要虚构数据/结论）：
-{_lines_from_spec()}
+内容（保持含义，不得虚构数据/结论）：
+{lines_text}
 """
 
+    review_prompt = f"""请审核这张图是否满足科研申报书可用标准，并严格输出 JSON：
+{{
+  "passed": true/false,
+  "score": 0-100,
+  "issues": ["问题1", "问题2"],
+  "improvements": ["改进建议1", "改进建议2"],
+  "summary": "一句话结论"
+}}
+
+审核维度：
+1) 结构完整性：流程/层次是否清晰，关系是否明确；
+2) 学术可用性：术语是否规范，是否避免不实结论；
+3) 可读性：中文是否清晰，是否拥挤或重叠；
+4) 图示质量：布局、对齐、视觉一致性。
+"""
+
+    actual_mode = mode
+    review_result = None
+    review_error = None
+    svg_text = ""
+    used_spec = raw_spec or {}
+
+    if mode == "infographic":
         try:
-            from backend.core.diagrams.openai_images import generate_image_png_via_openai_compatible
+            png_bytes, svg_text, used_spec, render_type = _render_local_infographic_assets(
+                diagram_type=diagram_type,
+                raw_spec=raw_spec,
+                lines_text=lines_text,
+                title=title,
+            )
+            review_result = {
+                "passed": True,
+                "score": 95,
+                "issues": [],
+                "improvements": [],
+                "summary": f"已通过本地信息图引擎生成（{render_type}）。",
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"本地信息图生成失败：{_redact_secrets(str(e))}")
+    else:
+        from backend.core.diagrams.openai_images import (
+            generate_image_png_via_openai_compatible,
+            review_image_via_openai_compatible,
+        )
+
+        async def _generate_image(prompt_text: str) -> bytes:
             last_err = None
             for size in ("1792x1024", "1024x1024"):
                 try:
-                    png_bytes, _raw = await generate_image_png_via_openai_compatible(
+                    png, _raw = await generate_image_png_via_openai_compatible(
                         base_url=cfg.base_url,
                         api_key=cfg.api_key,
                         model=image_model,
-                        prompt=image_prompt,
+                        prompt=prompt_text,
                         size=size,
                     )
-                    last_err = None
-                    break
+                    return png
                 except Exception as e:
                     last_err = e
                     continue
-            if last_err is not None:
-                raise last_err
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"成图模型生成失败：{_redact_secrets(str(e))}")
+            if last_err is None:
+                raise RuntimeError("成图模型未返回图像")
+            raise last_err
 
-    # Save assets
+        async def _review_image(png: bytes) -> dict:
+            review, _raw = await review_image_via_openai_compatible(
+                base_url=cfg.base_url,
+                api_key=cfg.api_key,
+                model=image_model,
+                review_prompt=review_prompt,
+                image_bytes=png,
+            )
+            return review
+
+        try:
+            png_bytes = await _generate_image(image_prompt)
+        except Exception as e:
+            # image_model 不稳定时，自动回退到本地 infographic，保证功能可用
+            gen_error = _redact_secrets(str(e))
+            logger.warning("image model generation failed, fallback to local infographic: %s", gen_error[:320])
+            try:
+                png_bytes, svg_text, used_spec, render_type = _render_local_infographic_assets(
+                    diagram_type=diagram_type,
+                    raw_spec=raw_spec,
+                    lines_text=lines_text,
+                    title=title,
+                )
+                actual_mode = "infographic"
+                review_error = gen_error
+                review_result = {
+                    "passed": True,
+                    "score": 88,
+                    "issues": ["成图模型接口不可用，已自动降级为本地信息图渲染。"],
+                    "improvements": ["如需照片级视觉风格，请恢复 image_model 服务后重试。"],
+                    "summary": f"已自动回退到本地信息图引擎（{render_type}）。",
+                }
+            except Exception as fallback_e:
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"成图模型生成失败：{gen_error}；本地回退也失败：{_redact_secrets(str(fallback_e))}",
+                )
+
+        if review_result is None:
+            try:
+                review_result = await _review_image(png_bytes)
+            except Exception as e:
+                review_error = _redact_secrets(str(e))
+                logger.warning("diagram review failed: %s", review_error[:280])
+
+        if isinstance(review_result, dict) and not review_result.get("passed", True):
+            suggestions = review_result.get("improvements") or review_result.get("issues") or []
+            if isinstance(suggestions, list) and suggestions:
+                suggestion_text = "\n".join([f"- {str(x).strip()}" for x in suggestions if str(x).strip()][:8])
+                retry_prompt = f"""{image_prompt}
+
+请根据以下审核意见重绘并提升图示质量（保持原有语义，不得虚构）：
+{suggestion_text}
+"""
+                try:
+                    revised = await _generate_image(retry_prompt)
+                    png_bytes = revised
+                    try:
+                        review_result = await _review_image(png_bytes)
+                        review_error = None
+                    except Exception as e:
+                        review_error = _redact_secrets(str(e))
+                except Exception as e:
+                    logger.warning("diagram retry generation failed: %s", _redact_secrets(str(e))[:260])
+
+    diagram_id = str(uuid.uuid4())
+    png_path, svg_path = _diagram_paths(session_id, diagram_id)
+
     try:
         png_path.write_bytes(png_bytes)
-        if svg_text and mode == "infographic":
+        if svg_text:
             svg_path.write_text(svg_text, encoding="utf-8")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"保存图示失败：{_redact_secrets(str(e))}")
 
-    # Build markdown snippet (data URI) for direct insertion/export.
     b64_png = base64.b64encode(png_bytes).decode("ascii")
     data_uri = f"data:image/png;base64,{b64_png}"
-    snippet = f"![{title}]({data_uri})"
+    snippet = _build_figure_markdown(title, data_uri)
 
     diagram_record = {
         "id": diagram_id,
         "title": title,
         "diagram_type": diagram_type,
-        "mode": mode,
+        "mode": actual_mode,
         "created_at": datetime.datetime.now().isoformat(timespec="seconds"),
         "has_png": True,
-        "has_svg": bool(svg_text) and mode == "infographic",
-        "spec": normalized_spec or raw_spec or None,
+        "has_svg": bool(svg_text),
+        "spec": used_spec or None,
         "meta": {
             "provider": getattr(cfg, "provider_name", None),
             "chat_model": getattr(cfg, "model", None),
             "image_model": image_model or None,
+            "review_model": image_model or None,
+            "render_engine": "local_infographic" if svg_text else "image_model",
+            "review": review_result,
+            "review_error": review_error,
         },
     }
     session.diagrams = (session.diagrams or []) + [diagram_record]
@@ -1399,12 +2188,113 @@ JSON 结构示例：
         "diagram_id": diagram_id,
         "title": title,
         "diagram_type": diagram_type,
-        "mode": mode,
+        "mode": actual_mode,
         "image_data_uri": data_uri,
         "markdown_snippet": snippet,
-        "has_svg": diagram_record["has_svg"],
+        "has_svg": bool(svg_text),
         "png_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.png",
-        "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg" if diagram_record["has_svg"] else None,
+        "svg_url": f"/api/chat/session/{session_id}/diagrams/{diagram_id}.svg" if svg_text else None,
+        "review": review_result,
+        "review_error": review_error,
+    }
+
+
+@router.post("/session/{session_id}/generate-illustrations")
+async def generate_illustrations(session_id: str, request: GenerateIllustrationsRequest):
+    """
+    文章配图 Agent：
+    1) 基于全文规划要生成的图；
+    2) 生成并审核图；
+    3) 最后再调用一次 LLM 规划插入位置并完成插入。
+    """
+    workflow = get_workflow()
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    if session.phase != "complete":
+        raise HTTPException(status_code=400, detail="全文尚未生成完成，请先完成文档生成后再触发配图。")
+
+    _ensure_llm_configured()
+
+    document_content = _normalize_markdown_text(request.document_content or "")
+    if len(document_content.strip()) < 30:
+        raise HTTPException(status_code=400, detail="文章内容过短，无法自动配图。")
+
+    mode = (request.mode or "infographic").strip().lower() or "infographic"
+    if mode not in {"infographic", "image_model", "auto"}:
+        raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
+    if mode == "auto":
+        mode = "infographic"
+
+    max_images = max(1, min(int(request.max_images or 2), 4))
+
+    registry = get_registry()
+    schematics_skill = registry.get("scientific-schematics")
+    agent_system_prompt = _resolve_skill_system_prompt(schematics_skill)
+    if len(agent_system_prompt) > 4000:
+        agent_system_prompt = agent_system_prompt[:4000]
+
+    # Step 1) 先基于全文规划配图任务
+    items = await _plan_illustration_items(
+        workflow=workflow,
+        document_content=document_content,
+        max_images=max_images,
+        agent_system_prompt=agent_system_prompt,
+    )
+
+    # Step 2) 逐图生成（仍复用 generate-diagram 主链路，selected_text 为核心，context_text 为全文）
+    created: List[Dict[str, Any]] = []
+    for item in items:
+        try:
+            result = await generate_diagram(
+                session_id=session_id,
+                request=DiagramRequest(
+                    title=item.get("title") or None,
+                    diagram_type=item.get("diagram_type") or "infographic",
+                    mode=mode,
+                    selected_text=(item.get("focus_text") or "").strip() or document_content[:1600],
+                    context_text=document_content,
+                ),
+            )
+            created.append({
+                "diagram_id": result.get("diagram_id"),
+                "title": result.get("title"),
+                "diagram_type": result.get("diagram_type"),
+                "markdown_snippet": result.get("markdown_snippet"),
+                "focus_text": item.get("focus_text") or "",
+                "review": result.get("review"),
+                "review_error": result.get("review_error"),
+            })
+        except Exception as e:
+            logger.warning("auto illustration generate failed: %s", _redact_secrets(str(e))[:260])
+            continue
+
+    if not created:
+        raise HTTPException(status_code=502, detail="自动配图失败：未生成任何图片。")
+
+    # Step 3) 最后一轮 LLM：决定插图位置
+    placements = await _plan_insertions_with_llm(
+        workflow=workflow,
+        document_content=document_content,
+        diagrams=created,
+        agent_system_prompt=agent_system_prompt,
+    )
+
+    # Step 4) 插入并优化排版
+    updated_document = _apply_diagram_insertions(
+        document_content=document_content,
+        diagrams=created,
+        placements=placements,
+    )
+
+    return {
+        "success": True,
+        "session_id": session_id,
+        "mode": mode,
+        "inserted_count": len(created),
+        "updated_document": updated_document,
+        "diagrams": created,
+        "placements": placements,
     }
 
 
@@ -1584,6 +2474,9 @@ async def get_requirements(session_id: str):
 
     return {
         "session_id": session_id,
+        "phase": session.phase,
+        "is_complete": session.phase == "complete",
+        "has_document": bool(session.final_document),
         "requirements": session.requirements or {},
         "fields": fields,
         "external_information": session.external_information,

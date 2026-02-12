@@ -227,20 +227,21 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
           </div>
         </div>
-
         <input
-          v-else
           v-model="formData.model"
           type="text"
-          placeholder="例如：gpt-4o-mini"
-          class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+          placeholder="例如：gemini-3-flash"
+          class="w-full mt-2 px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
         />
+        <p class="text-[11px] text-dark-50 mt-2">
+          支持手动输入模型名；下拉列表仅用于快速选择。
+        </p>
       </div>
 
-      <!-- Image Model (Optional) -->
+      <!-- Image Model -->
       <div v-if="!selectedPreset.requires_oauth" class="mb-4">
         <div class="flex items-center justify-between mb-2">
-          <label class="block text-sm font-medium text-dark-100">成图模型（可选）</label>
+          <label class="block text-sm font-medium text-dark-100">成图模型</label>
           <span class="text-xs text-dark-50">用于生成图示</span>
         </div>
 
@@ -249,7 +250,7 @@
             v-model="formData.image_model"
             class="w-full px-4 py-3 pr-10 bg-warm-100 border border-warm-300 rounded-xl text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent appearance-none cursor-pointer"
           >
-            <option value="">(无) 使用本地信息图渲染</option>
+            <option value="">(无) 暂不配置成图模型</option>
             <option
               v-for="model in selectedPreset.models.filter(m => m.type === 'image')"
               :key="model.id"
@@ -262,18 +263,15 @@
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" /></svg>
           </div>
         </div>
-
-        <div v-else>
-          <input
-            v-model="formData.image_model"
-            type="text"
-            placeholder="例如：dall-e-3 (留空则使用本地渲染)"
-            class="w-full px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
-          />
-          <p class="text-[11px] text-dark-50 mt-2">
-            当前提供商未列出绘图模型，可手动输入或留空（推荐：留空使用本地 SVG 渲染，文字更清晰）。
-          </p>
-        </div>
+        <input
+          v-model="formData.image_model"
+          type="text"
+          placeholder="例如：gemini-3-pro-image-preview"
+          class="w-full mt-2 px-4 py-3 bg-warm-100 border border-warm-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-anthropic-orange focus:border-transparent"
+        />
+        <p class="text-[11px] text-dark-50 mt-2">
+          支持手动输入成图模型名。当前绘图功能依赖该字段，留空将无法生成图示。
+        </p>
       </div>
 
       <!-- Temperature -->
@@ -381,6 +379,10 @@
         <li class="flex items-start gap-2">
           <span class="text-anthropic-orange">•</span>
           <span><strong>Ollama：</strong> 本地运行 <code class="bg-warm-200 px-1 rounded">ollama serve</code></span>
+        </li>
+        <li class="flex items-start gap-2">
+          <span class="text-anthropic-orange">•</span>
+          <span><strong>Antigravity：</strong> Base URL 使用 <code class="bg-warm-200 px-1 rounded">http://127.0.0.1:8045/v1</code>，可手动输入模型名。</span>
         </li>
       </ul>
     </div>

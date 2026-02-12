@@ -100,6 +100,16 @@ def _load_presets_from_json() -> Dict[str, Any]:
         "requires_oauth": True,
     }
 
+    # Local OpenAI-compatible gateway (manual model input preferred)
+    presets["antigravity"] = {
+        "provider": LLMProviderType.OPENAI_COMPATIBLE,
+        "provider_name": "Antigravity",
+        "base_url": "http://127.0.0.1:8045/v1",
+        "model": "gemini-3-flash",
+        "models": [],
+        "no_api_key": False,
+    }
+
     return presets
 
 

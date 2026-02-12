@@ -45,8 +45,8 @@
 
           <div v-if="isUploading" class="flex flex-col items-center">
             <div class="w-12 h-12 border-3 border-warm-300 border-t-anthropic-orange rounded-full spinner mb-3"></div>
-            <p class="text-dark-100 font-medium">正在抽取信息...</p>
-            <p class="text-xs text-dark-50 mt-1">请稍候</p>
+            <p class="text-dark-100 font-medium">正在并行处理文件...</p>
+            <p class="text-xs text-dark-50 mt-1">进行中：{{ uploadTaskCount }} 批 · 你仍可继续上传</p>
           </div>
 
           <div v-else class="text-center">
@@ -333,8 +333,8 @@
         <div class="rounded-2xl border border-warm-300 bg-warm-100/80 p-4">
           <div class="flex items-start justify-between gap-3">
             <div>
-              <p class="text-sm font-semibold text-dark-300">已生成图示（下载 PNG/SVG）</p>
-              <p class="text-xs text-dark-50 mt-1">PNG 可直接插入文档；信息图模式提供 SVG（可编辑）。</p>
+              <p class="text-sm font-semibold text-dark-300">已生成图示（下载 PNG）</p>
+              <p class="text-xs text-dark-50 mt-1">当前新生成图示统一为 PNG（直接插入文档）；历史信息图仍可下载 SVG。</p>
             </div>
             <span class="text-xs bg-warm-200 text-dark-100 px-2 py-0.5 rounded-full border border-warm-300">
               {{ sessionDiagrams.length }} 个
@@ -342,7 +342,7 @@
           </div>
 
           <div v-if="sessionDiagrams.length === 0" class="text-xs text-dark-50 mt-3">
-            生成图示后，这里会出现可下载版本（PNG/SVG）。
+            生成图示后，这里会出现可下载 PNG。
           </div>
           <div v-else class="mt-3 space-y-2">
             <div
@@ -390,8 +390,8 @@
     </section>
 
     <!-- Right Pane: Preview + Actions -->
-    <section class="flex flex-col flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
-      <header class="px-4 py-3 border-b border-warm-300 bg-gradient-to-b from-warm-100 to-warm-50 flex items-center justify-between gap-3">
+    <section class="preview-pane flex flex-col flex-1 min-h-0 h-full rounded-2xl border border-warm-300 bg-warm-50/80 overflow-hidden shadow-sm hover:shadow-lg transition-shadow">
+      <header class="px-4 py-3 border-b border-warm-300 bg-gradient-to-b from-warm-100 to-warm-50 flex items-center justify-between gap-3" :class="{ 'diagram-header-active': diagramGenerating }">
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-9 h-9 bg-warm-200 rounded-xl flex items-center justify-center shrink-0">
             <svg class="w-4.5 h-4.5 text-dark-50" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -409,7 +409,7 @@
             type="button"
             @click="startGeneration"
             :disabled="!canGenerate || isWriting"
-            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-anthropic-orange text-white hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-150 flex items-center gap-2 active:scale-[0.98]"
+            class="lively-action-btn px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-anthropic-orange text-white hover:bg-anthropic-orange-dark disabled:bg-warm-300 disabled:text-warm-500 disabled:cursor-not-allowed transition-all duration-150 flex items-center gap-2 active:scale-[0.98]"
             :title="canGenerate ? '开始生成' : '请先上传材料'"
           >
             <svg v-if="!isWriting" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -423,49 +423,38 @@
             v-if="documentContent"
             type="button"
             @click="copyDocument"
-            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors active:scale-[0.98]"
+            class="lively-action-btn px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors active:scale-[0.98]"
           >
             {{ copyButtonText }}
           </button>
 
           <div v-if="documentContent" class="flex items-center gap-2 px-2 py-1.5 rounded-lg bg-warm-100 border border-warm-300">
             <span class="text-[11px] text-dark-50">图示模式</span>
-            <select
-              v-model="diagramMode"
-              class="text-[11px] bg-warm-50 border border-warm-300 rounded-md px-2 py-1 text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange/40"
-              :disabled="diagramGenerating"
-              title="信息图：本地渲染（推荐）；成图模型：需要设置 image_model"
-            >
-              <option value="infographic">信息图（推荐）</option>
-              <option value="image_model">成图模型</option>
-              <option value="auto">自动</option>
-            </select>
-          </div>
+              <select
+                v-model="diagramMode"
+                class="text-[11px] bg-warm-50 border border-warm-300 rounded-md px-2 py-1 text-dark-300 focus:outline-none focus:ring-2 focus:ring-anthropic-orange/40"
+                :disabled="diagramGenerating"
+                title="信息图风格：LLM 结构化 + 本地代码渲染；结构图风格：成图模型生成"
+              >
+                <option value="infographic">信息图风格</option>
+                <option value="image_model">结构图风格</option>
+              </select>
+            </div>
 
           <button
             v-if="documentContent"
             type="button"
-            @click="insertTechnicalRouteDiagram"
-            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-signal-100 text-signal-700 hover:bg-signal-200 transition-colors active:scale-[0.98]"
-            :disabled="diagramGenerating"
-            :title="diagramGenerating ? '正在生成图...' : `生成并插入技术路线图（${diagramModeLabel} PNG）`"
+            @click="generateIllustrations"
+            class="lively-action-btn px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-signal-100 text-signal-700 hover:bg-signal-200 disabled:bg-warm-300 disabled:text-warm-500 disabled:cursor-not-allowed transition-colors active:scale-[0.98] flex items-center gap-2"
+            :disabled="!canGenerateIllustrations"
+            :title="!canGenerateIllustrations ? '请先完成全文生成，再执行自动配图。' : (diagramGenerating ? '正在生成图...' : `基于全文自动生成并插入配图（${diagramModeLabel}）`)"
           >
-            {{ diagramGenerating ? '生成图...' : '插入技术路线图' }}
-          </button>
-
-          <button
-            v-if="documentContent"
-            type="button"
-            @click="insertResearchFrameworkDiagram"
-            class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-signal-100 text-signal-700 hover:bg-signal-200 transition-colors active:scale-[0.98]"
-            :disabled="diagramGenerating"
-            :title="diagramGenerating ? '正在生成图...' : `生成并插入研究框架图（${diagramModeLabel} PNG）`"
-          >
-            {{ diagramGenerating ? '生成图...' : '插入研究框架图' }}
+            <span v-if="diagramGenerating" class="w-3.5 h-3.5 border-2 border-signal-700/25 border-t-signal-700 rounded-full spinner"></span>
+            {{ diagramGenerating ? '配图生成中' : '生成配图' }}
           </button>
 
           <div v-if="documentContent" class="relative" ref="exportDropdown">
-            <button type="button" @click="showExportMenu = !showExportMenu" class="px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors flex items-center gap-2 active:scale-[0.98]">
+            <button type="button" @click="showExportMenu = !showExportMenu" class="lively-action-btn px-2.5 py-1.5 text-[11px] font-semibold rounded-lg bg-warm-200 text-dark-100 hover:bg-warm-300 transition-colors flex items-center gap-2 active:scale-[0.98]">
               导出
               <svg class="w-4 h-4 transition-transform" :class="{ 'rotate-180': showExportMenu }" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
@@ -522,11 +511,32 @@
           自动执行：去重（信息层面，非语义）→ 标题/字段格式整理 → 清理无关输出。仅优化展示，不新增/篡改事实。
         </p>
       </div>
+      <div v-else-if="diagramGenerating" class="px-4 py-3 border-b border-warm-300 bg-signal-100/45 diagram-status-card">
+        <div class="flex items-center gap-2 mb-2">
+          <div class="relative">
+            <span class="block w-4 h-4 border-2 border-signal-700/25 border-t-signal-700 rounded-full spinner"></span>
+            <span class="absolute inset-0 rounded-full diagram-pulse-ring"></span>
+          </div>
+          <span class="font-medium text-dark-300 text-sm">图示 Agent 正在处理{{ diagramTaskHint || '配图请求' }}...</span>
+        </div>
+        <div class="diagram-loading-track">
+          <span class="diagram-loading-shimmer"></span>
+        </div>
+        <p class="mt-2 text-[11px] text-dark-50">阶段：文本概括 → 结构化规格 → 本地渲染/模型渲染 → 插入文档</p>
+      </div>
       <div v-else-if="postProcessToast" class="px-4 py-2 border-b border-warm-300 bg-black/20">
         <p class="text-[11px] text-dark-50">{{ postProcessToast }}</p>
       </div>
 
-      <div class="flex-1 min-h-0 overflow-y-auto p-6">
+      <div class="flex-1 min-h-0 overflow-y-auto p-6 relative">
+        <div v-if="diagramGenerating" class="absolute top-4 right-4 z-20 pointer-events-none">
+          <div class="diagram-floating-chip">
+            <span class="diagram-dot"></span>
+            <span class="diagram-dot"></span>
+            <span class="diagram-dot"></span>
+            <span class="text-[11px] text-signal-700 font-semibold">绘图中</span>
+          </div>
+        </div>
         <Transition name="fade" mode="out-in">
           <div v-if="documentContent" key="content" class="markdown-content prose prose-warm max-w-none" v-html="renderedDocumentDebounced"></div>
           <div v-else key="empty" class="h-full flex items-center justify-center">
@@ -569,6 +579,8 @@ const skillId = computed(() => route.params.skillId)
 // Core state
 const skill = ref(null)
 const sessionId = ref(null)
+const sessionPhase = ref('init')
+const sessionHasDocument = ref(false)
 const isWriting = ref(false)
 const documentContent = ref('')
 const savedDocumentId = ref(null)
@@ -617,7 +629,8 @@ const sessionDiagrams = ref([])
 
 // UI state
 const fileInputRef = ref(null)
-const isUploading = ref(false)
+const uploadTaskCount = ref(0)
+const isUploading = computed(() => uploadTaskCount.value > 0)
 const isDragging = ref(false)
 const showExportMenu = ref(false)
 const exportDropdown = ref(null)
@@ -629,11 +642,11 @@ let toastTimer = null
 
 // Diagram insertion
 const diagramGenerating = ref(false)
+const diagramTaskHint = ref('')
 const diagramMode = ref('infographic')
 const diagramModeLabel = computed(() => {
-  if (diagramMode.value === 'image_model') return '成图模型'
-  if (diagramMode.value === 'auto') return '自动'
-  return '信息图'
+  if (diagramMode.value === 'image_model') return '结构图风格'
+  return '信息图风格'
 })
 
 // Text Selection Menu
@@ -641,9 +654,15 @@ const selectionMenuVisible = ref(false)
 const selectionMenuPosition = ref({ top: 0, left: 0 })
 const selectedTextContext = ref('')
 
+const isSelectionMenuTarget = (target) => {
+  return target instanceof Element && !!target.closest('.selection-menu')
+}
+
 const handleMouseUp = (event) => {
+  if (isSelectionMenuTarget(event?.target)) return
+
   const selection = window.getSelection()
-  const text = selection.toString().trim()
+  const text = selection ? selection.toString().trim() : ''
 
   if (!text) {
     selectionMenuVisible.value = false
@@ -672,16 +691,17 @@ const handleMouseUp = (event) => {
 
 // Global click listener to close menu when clicking elsewhere
 const handleGlobalClick = (event) => {
-  // If clicking on the menu itself, do nothing (handled by stop propagation in menu)
-  if (selectionMenuVisible.value) {
-    selectionMenuVisible.value = false
-  }
+  if (!selectionMenuVisible.value) return
+  if (isSelectionMenuTarget(event?.target)) return
+  selectionMenuVisible.value = false
 }
 
 const handleDiagramGenerationFromSelection = async (type) => {
+  if (diagramGenerating.value) return
   if (!sessionId.value || !selectedTextContext.value) return
 
   selectionMenuVisible.value = false
+  diagramTaskHint.value = '划词配图'
   diagramGenerating.value = true
 
   try {
@@ -689,7 +709,8 @@ const handleDiagramGenerationFromSelection = async (type) => {
       title: '生成图示',
       diagram_type: type, // 'infographic', 'technical_route', 'research_framework'
       mode: diagramMode.value,
-      context_text: selectedTextContext.value
+      selected_text: selectedTextContext.value,
+      context_text: documentContent.value
     })
 
     const snippet = response.data.markdown_snippet
@@ -706,11 +727,13 @@ const handleDiagramGenerationFromSelection = async (type) => {
 
     // Strategy: Append to document for now, user can move it.
     // Or improved strategy: Insert after the first heading like others
-    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
+    documentContent.value = normalizeMarkdownLayout(insertAfterFirstHeading(documentContent.value, snippet))
 
     await saveDocument()
     await fetchSessionMeta()
-    showToast('已插入图示', '图示已基于选中内容生成并插入文档。')
+    const reviewScore = response.data?.review?.score
+    const note = typeof reviewScore === 'number' ? `（审核 ${reviewScore} 分）` : ''
+    showToast('已插入图示', `图示已基于选中内容生成并插入文档${note}。`)
 
   } catch (e) {
     console.error('Context diagram generation failed:', e)
@@ -718,6 +741,7 @@ const handleDiagramGenerationFromSelection = async (type) => {
     showToast('生成失败', e.response?.data?.detail || '生成失败，请重试。')
   } finally {
     diagramGenerating.value = false
+    diagramTaskHint.value = ''
     selectedTextContext.value = ''
   }
 }
@@ -736,6 +760,14 @@ const canGenerate = computed(() => {
   if (!sessionId.value) return false
   if (isUploading.value) return false
   return uploadedFiles.value.length > 0 || !!skillOverlay.value
+})
+
+const canGenerateIllustrations = computed(() => {
+  if (!sessionId.value) return false
+  if (!documentContent.value.trim()) return false
+  if (diagramGenerating.value) return false
+  if (isWriting.value || isPostProcessing.value) return false
+  return sessionPhase.value === 'complete' && sessionHasDocument.value
 })
 
 const progressPercent = computed(() => {
@@ -835,72 +867,75 @@ const runSearch = async () => {
   }
 }
 
+const normalizeMarkdownLayout = (markdown) => {
+  const text = (markdown || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n')
+  const lines = text.split('\n')
+  const result = []
+  let blankCount = 0
+  lines.forEach((line) => {
+    if (line.trim()) {
+      blankCount = 0
+      result.push(line.replace(/\s+$/, ''))
+      return
+    }
+    blankCount += 1
+    if (blankCount <= 2) result.push('')
+  })
+  return `${result.join('\n').trim()}\n`
+}
+
+const normalizeFigureSnippet = (snippet) => {
+  const text = (snippet || '').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim()
+  if (!text) return ''
+  return text.replace(/\n{3,}/g, '\n\n')
+}
+
 const insertAfterFirstHeading = (markdown, snippet) => {
-  const text = markdown || ''
+  const text = normalizeMarkdownLayout(markdown || '')
+  const figure = normalizeFigureSnippet(snippet)
+  if (!figure) return text
+
   const lines = text.split('\n')
   const idx = lines.findIndex((ln) => ln.trim().startsWith('#'))
   if (idx >= 0) {
-    lines.splice(idx + 1, 0, '', snippet, '')
-    return lines.join('\n')
+    lines.splice(idx + 1, 0, '', figure, '')
+    return normalizeMarkdownLayout(lines.join('\n'))
   }
-  return `${snippet}\n\n${text}`.trim() + '\n'
+  return normalizeMarkdownLayout(`${figure}\n\n${text}`)
 }
 
-const insertTechnicalRouteDiagram = async () => {
+const generateIllustrations = async () => {
   if (!sessionId.value) return
   if (!documentContent.value) return
-  if (diagramGenerating.value) return
-  diagramGenerating.value = true
-  try {
-    const response = await api.post(`/chat/session/${sessionId.value}/generate-diagram`, {
-      title: '技术路线图',
-      diagram_type: 'technical_route',
-      mode: diagramMode.value
-    })
-    const snippet = response.data.markdown_snippet
-    if (!snippet) {
-      showToast('生成失败', '未返回可插入的图示。')
-      return
-    }
-    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
-    await saveDocument()
-    await fetchSessionMeta()
-    showToast('已插入图示', '技术路线图已插入到文档开头。')
-  } catch (e) {
-    console.error('Diagram generation failed:', e)
-    if (notifyModelNotConfigured(e)) return
-    showToast('生成失败', e.response?.data?.detail || '生成图示失败，请重试。')
-  } finally {
-    diagramGenerating.value = false
+  if (!canGenerateIllustrations.value) {
+    showToast('暂不可用', '请先完成全文生成后再自动配图。')
+    return
   }
-}
-
-const insertResearchFrameworkDiagram = async () => {
-  if (!sessionId.value) return
-  if (!documentContent.value) return
-  if (diagramGenerating.value) return
+  diagramTaskHint.value = '全文配图'
   diagramGenerating.value = true
   try {
-    const response = await api.post(`/chat/session/${sessionId.value}/generate-diagram`, {
-      title: '研究框架图',
-      diagram_type: 'research_framework',
-      mode: diagramMode.value
+    const response = await api.post(`/chat/session/${sessionId.value}/generate-illustrations`, {
+      document_content: documentContent.value,
+      mode: diagramMode.value,
+      max_images: 2
     })
-    const snippet = response.data.markdown_snippet
-    if (!snippet) {
-      showToast('生成失败', '未返回可插入的图示。')
+    const updated = response.data?.updated_document
+    const insertedCount = response.data?.inserted_count || 0
+    if (!updated) {
+      showToast('生成失败', '未返回更新后的文档内容。')
       return
     }
-    documentContent.value = insertAfterFirstHeading(documentContent.value, snippet)
+    documentContent.value = normalizeMarkdownLayout(updated)
     await saveDocument()
     await fetchSessionMeta()
-    showToast('已插入图示', '研究框架图已插入到文档开头。')
+    showToast('配图完成', `已自动插入 ${insertedCount} 张配图。`)
   } catch (e) {
-    console.error('Diagram generation failed:', e)
+    console.error('Auto illustration failed:', e)
     if (notifyModelNotConfigured(e)) return
-    showToast('生成失败', e.response?.data?.detail || '生成图示失败，请重试。')
+    showToast('生成失败', e.response?.data?.detail || '自动配图失败，请重试。')
   } finally {
     diagramGenerating.value = false
+    diagramTaskHint.value = ''
   }
 }
 
@@ -969,6 +1004,8 @@ const fetchSessionMeta = async () => {
   if (!sessionId.value) return
   try {
     const response = await api.get(`/chat/session/${sessionId.value}/requirements`)
+    sessionPhase.value = response.data.phase || sessionPhase.value
+    sessionHasDocument.value = !!response.data.has_document
     externalInformation.value = response.data.external_information || ''
     skillOverlay.value = response.data.skill_overlay || null
     sessionDiagrams.value = response.data.diagrams || []
@@ -997,6 +1034,8 @@ const startSession = async () => {
   try {
     const response = await api.post('/chat/start', { skill_id: skillId.value })
     sessionId.value = response.data.session_id
+    sessionPhase.value = response.data.phase || 'requirement'
+    sessionHasDocument.value = false
     savedDocumentId.value = null
     skillOverlay.value = null
     plannerPlan.value = null
@@ -1019,6 +1058,8 @@ const startGeneration = async () => {
       showToast('无法生成', response.data.message || '请先补充信息后再生成。')
       return
     }
+    sessionPhase.value = response.data.phase || 'writing'
+    sessionHasDocument.value = false
     await startStreamGeneration()
   } catch (e) {
     console.error('Failed to start generation:', e)
@@ -1029,6 +1070,8 @@ const startGeneration = async () => {
 
 const startStreamGeneration = async () => {
   isWriting.value = true
+  sessionPhase.value = 'writing'
+  sessionHasDocument.value = false
   documentContent.value = ''
   writingProgress.value = { current: 0, total: 0 }
   resetStageState()
@@ -1079,6 +1122,8 @@ const startStreamGeneration = async () => {
         case 'complete':
           isWriting.value = false
           isPostProcessing.value = false
+          sessionPhase.value = 'complete'
+          sessionHasDocument.value = true
           currentSection.value = ''
           resetStageState()
           documentContent.value = data.document
@@ -1181,8 +1226,7 @@ const uploadFilesJson = async (files) => {
 
 const uploadFiles = async (files) => {
   if (!sessionId.value || files.length === 0) return
-  if (isUploading.value) return
-  isUploading.value = true
+  uploadTaskCount.value += 1
   try {
     let response = null
 
@@ -1229,7 +1273,7 @@ const uploadFiles = async (files) => {
     }
     showToast('上传失败', e.response?.data?.detail || e.message || '文件上传失败')
   } finally {
-    isUploading.value = false
+    uploadTaskCount.value = Math.max(0, uploadTaskCount.value - 1)
   }
 }
 
@@ -1325,6 +1369,109 @@ onUnmounted(() => {
 @keyframes dropdown-out {
   from { opacity: 1; transform: translateY(0) scale(1); }
   to { opacity: 0; transform: translateY(-6px) scale(0.95); }
+}
+
+.lively-action-btn {
+  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
+}
+
+.lively-action-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 18px rgba(2, 6, 23, 0.18);
+  filter: saturate(1.06);
+}
+
+.preview-pane {
+  position: relative;
+}
+
+.diagram-header-active {
+  animation: header-breathe 2.2s ease-in-out infinite;
+}
+
+@keyframes header-breathe {
+  0%, 100% { box-shadow: inset 0 0 0 rgba(98, 181, 255, 0); }
+  50% { box-shadow: inset 0 -12px 32px rgba(56, 189, 248, 0.08); }
+}
+
+.diagram-status-card {
+  position: relative;
+  overflow: hidden;
+}
+
+.diagram-status-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(110deg, transparent 0%, rgba(255,255,255,0.16) 45%, transparent 90%);
+  transform: translateX(-120%);
+  animation: shimmer-slide 1.8s ease-in-out infinite;
+}
+
+.diagram-loading-track {
+  width: 100%;
+  height: 6px;
+  border-radius: 9999px;
+  background: rgba(100, 116, 139, 0.18);
+  overflow: hidden;
+}
+
+.diagram-loading-shimmer {
+  display: block;
+  height: 100%;
+  width: 45%;
+  border-radius: 9999px;
+  background: linear-gradient(90deg, #0ea5e9, #38bdf8);
+  animation: loading-run 1.3s ease-in-out infinite;
+}
+
+@keyframes loading-run {
+  0% { transform: translateX(-110%); }
+  100% { transform: translateX(240%); }
+}
+
+@keyframes shimmer-slide {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(130%); }
+}
+
+.diagram-pulse-ring {
+  border: 1px solid rgba(14, 165, 233, 0.45);
+  animation: pulse-ring 1.25s ease-out infinite;
+}
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.8); opacity: 0.75; }
+  70% { transform: scale(1.6); opacity: 0.0; }
+  100% { transform: scale(1.8); opacity: 0; }
+}
+
+.diagram-floating-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0.35rem 0.6rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(56, 189, 248, 0.38);
+  background: rgba(240, 249, 255, 0.92);
+  backdrop-filter: blur(4px);
+  box-shadow: 0 10px 22px rgba(2, 132, 199, 0.18);
+}
+
+.diagram-dot {
+  width: 0.35rem;
+  height: 0.35rem;
+  border-radius: 9999px;
+  background: #0284c7;
+  animation: dot-bounce 0.95s ease-in-out infinite;
+}
+
+.diagram-dot:nth-child(2) { animation-delay: 0.12s; }
+.diagram-dot:nth-child(3) { animation-delay: 0.24s; }
+
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.45; }
+  40% { transform: translateY(-3px); opacity: 1; }
 }
 
 .prose-warm {
