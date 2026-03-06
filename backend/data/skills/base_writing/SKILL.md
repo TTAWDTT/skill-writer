@@ -8,6 +8,7 @@ tags:
   - writing
   - guidelines
   - rubric
+role: meta_writing
 user-invocable: false
 ---
 
@@ -135,4 +136,3 @@ Concrete Skill（L2：具体文书 skill）
 - 目标是形成“专家经验联合体”。
 
 **BaseWritingSkill 是 Skill 体系的智慧层。**
-

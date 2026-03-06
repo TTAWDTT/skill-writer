@@ -15,6 +15,14 @@ class SectionType(str, Enum):
     CONDITIONAL = "conditional"  # 条件性必填
 
 
+class SkillRole(str, Enum):
+    """Skill 在系统中的职责类型"""
+    DOCUMENT = "document"
+    META_WRITING = "meta_writing"
+    WORKFLOW_HELPER = "workflow_helper"
+    SKILL_GENERATOR = "skill_generator"
+
+
 class Section(BaseModel):
     """章节定义"""
     id: str
@@ -55,6 +63,8 @@ class SkillMetadata(BaseModel):
     author: str = ""
     created_at: str = ""
     updated_at: str = ""
+    role: SkillRole = SkillRole.DOCUMENT
+    user_invocable: bool = True
 
 
 class BaseSkill(ABC):
@@ -187,3 +197,10 @@ revised_content 必须是纯文本，不允许 JSON/列表/对象。
             "writing_guidelines": self.writing_guidelines,
             "evaluation_criteria": self.evaluation_criteria,
         }
+
+    def get_prompt_resource(self, name: str) -> str:
+        """
+        获取 Skill 自定义提示词资源（如 prompts/{name}.md）。
+        默认实现返回空字符串，具体 Skill 可覆盖。
+        """
+        return ""

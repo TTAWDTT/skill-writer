@@ -5,7 +5,7 @@ Skill 注册表
 from typing import Dict, List, Optional, Type
 from pathlib import Path
 
-from .base import BaseSkill, SkillMetadata
+from .base import BaseSkill, SkillMetadata, SkillRole
 from .base_writing import BaseWritingAugmentedSkill
 
 
@@ -118,13 +118,14 @@ class SkillRegistry:
         self._file_loader = SkillLoader(directory)
         loaded_skills = self._file_loader.load_all()
 
-        # Apply global BaseWritingSkill (meta skill) if present.
+        # Apply global BaseWritingSkill (meta skill) only to concrete document skills.
         base_writing = loaded_skills.get("base_writing")
-        if base_writing:
+        if base_writing and base_writing.metadata.role == SkillRole.META_WRITING:
             for skill_id, skill in list(loaded_skills.items()):
                 if skill_id == "base_writing":
                     continue
-                loaded_skills[skill_id] = BaseWritingAugmentedSkill(base_writing, skill)
+                if skill.metadata.role == SkillRole.DOCUMENT:
+                    loaded_skills[skill_id] = BaseWritingAugmentedSkill(base_writing, skill)
 
         # 注册到主注册表
         for skill_id, skill in loaded_skills.items():

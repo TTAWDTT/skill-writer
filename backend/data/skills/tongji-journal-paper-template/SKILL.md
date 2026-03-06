@@ -5,6 +5,7 @@ version: "1.0.0"
 category: academic-writing
 tags: ['学术论文', '投稿模板', '同济学报', '论文写作']
 author: user
+role: document
 user-invocable: true
 ---
 

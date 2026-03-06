@@ -10,7 +10,7 @@ from typing import Dict, List, Any, Optional
 import yaml
 import jinja2
 
-from .base import BaseSkill, Section, SectionType, RequirementField, SkillMetadata
+from .base import BaseSkill, Section, SectionType, RequirementField, SkillMetadata, SkillRole
 
 
 def parse_skill_md(content: str) -> Dict[str, Any]:
@@ -101,6 +101,7 @@ class FileBasedSkill(BaseSkill):
             'author': parsed.get('author', ''),
             'created_at': parsed.get('created_at', ''),
             'updated_at': parsed.get('updated_at', ''),
+            'role': parsed.get('role', self._infer_role(parsed.get('name', self.skill_path.name))),
             # 官方格式的额外字段
             'allowed_tools': parsed.get('allowed-tools', []),
             'model': parsed.get('model', ''),
@@ -112,6 +113,20 @@ class FileBasedSkill(BaseSkill):
         """从 skill.yaml 加载配置（传统格式）"""
         with open(skill_yaml, 'r', encoding='utf-8') as f:
             self._config = yaml.safe_load(f)
+        self._config = self._config or {}
+        self._config.setdefault('role', self._infer_role(self._config.get('id') or self.skill_path.name))
+        self._config.setdefault('user_invocable', True)
+
+    def _infer_role(self, skill_name: str) -> str:
+        """兼容旧 Skill：在缺少 role 时按内置命名推断。"""
+        normalized = str(skill_name or self.skill_path.name).strip().lower().replace("_", "-")
+        if normalized == "base-writing" or normalized == "base_writing":
+            return SkillRole.META_WRITING.value
+        if normalized in {"writer-skill-creator", "writer_skill_creator"}:
+            return SkillRole.SKILL_GENERATOR.value
+        if normalized in {"session-triadic-guideline", "session_triadic_guideline", "scientific-schematics", "scientific-infographic-codegen"}:
+            return SkillRole.WORKFLOW_HELPER.value
+        return SkillRole.DOCUMENT.value
 
     def _load_auxiliary_files(self):
         """加载辅助配置文件"""
@@ -163,6 +178,17 @@ class FileBasedSkill(BaseSkill):
         else:
             self._section_prompt_template = ""
 
+        # 加载 prompts 目录下所有 markdown 资源（便于 Agent 按名称读取）
+        self._prompt_resources = {}
+        prompts_dir = self.skill_path / "prompts"
+        if prompts_dir.exists() and prompts_dir.is_dir():
+            for md_file in prompts_dir.glob("*.md"):
+                try:
+                    with open(md_file, 'r', encoding='utf-8') as f:
+                        self._prompt_resources[md_file.stem] = f.read()
+                except Exception:
+                    continue
+
     @property
     def metadata(self) -> SkillMetadata:
         """返回 Skill 元数据"""
@@ -176,6 +202,8 @@ class FileBasedSkill(BaseSkill):
             author=self._config.get('author', ''),
             created_at=self._config.get('created_at', ''),
             updated_at=self._config.get('updated_at', ''),
+            role=self._config.get('role', SkillRole.DOCUMENT.value),
+            user_invocable=bool(self._config.get('user_invocable', True)),
         )
 
     @property
@@ -289,6 +317,7 @@ class FileBasedSkill(BaseSkill):
             'section_evaluation_points': '\n'.join(f"- {p}" for p in section.evaluation_points) if section.evaluation_points else "无",
             'written_sections': written_sections,
             'external_information': external_information,
+            'requirements': requirements,
             **requirements,  # 展开所有用户需求字段
         }
 
@@ -382,6 +411,12 @@ class FileBasedSkill(BaseSkill):
             "system_prompt": self.system_prompt,
             "collection_strategy": self.collection_strategy,
         }
+
+    def get_prompt_resource(self, name: str) -> str:
+        """获取 prompts/{name}.md 内容"""
+        if not name:
+            return ""
+        return self._prompt_resources.get(name, "")
 
 
 class SkillLoader:
