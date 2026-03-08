@@ -2,7 +2,7 @@
 Chat API 路由
 处理与工作流的交互对话，支持流式输出
 """
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Any, Dict
@@ -28,6 +28,8 @@ from backend.core.agents.file_extractor import (
 )
 from backend.core.agents.skill_fixer_agent import SkillFixerAgent
 from backend.core.llm.config_store import has_llm_credentials, get_llm_config
+from backend.models.job_store import JobStore
+from backend.api.security import require_bearer_token
 
 try:
     import multipart  # noqa: F401
@@ -42,6 +44,7 @@ logger = logging.getLogger(__name__)
 _UPLOAD_PARSE_CONCURRENCY = max(1, min(int(os.getenv("UPLOAD_PARSE_CONCURRENCY", "4")), 12))
 _UPLOAD_SESSION_LOCKS: Dict[str, asyncio.Lock] = {}
 _UPLOAD_SESSION_LOCKS_GUARD = asyncio.Lock()
+_JOB_STORE = JobStore()
 
 
 def _redact_secrets(message: str) -> str:
@@ -64,6 +67,27 @@ def _redact_secrets(message: str) -> str:
 def _ensure_llm_configured():
     if not has_llm_credentials():
         raise HTTPException(status_code=400, detail="模型未配置")
+
+
+def _client_error_message(_: Optional[Exception] = None) -> str:
+    return "请求处理失败，请稍后重试。"
+
+
+def _get_authorized_session(workflow, session_id: str, owner_token: str):
+    session = workflow.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+
+    existing_owner = (getattr(session, "owner_token", "") or "").strip()
+    if existing_owner and existing_owner != owner_token:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    # Claim legacy sessions that predate owner_token.
+    if not existing_owner:
+        session.owner_token = owner_token
+        workflow.save_session(session)
+
+    return session
 
 
 def _resolve_skill_system_prompt(skill: Any) -> str:
@@ -171,7 +195,7 @@ class GenerateIllustrationsRequest(BaseModel):
 
 
 @router.post("/start", response_model=SessionResponse)
-async def start_session(request: StartSessionRequest):
+async def start_session(payload: StartSessionRequest, request: Request):
     """
     开始新会话
 
@@ -180,15 +204,16 @@ async def start_session(request: StartSessionRequest):
     """
     # 验证 skill 存在
     registry = get_registry()
-    skill = registry.get(request.skill_id)
+    skill = registry.get(payload.skill_id)
     if not skill:
-        raise HTTPException(status_code=404, detail=f"Skill not found: {request.skill_id}")
+        raise HTTPException(status_code=404, detail=f"Skill not found: {payload.skill_id}")
 
     _ensure_llm_configured()
+    owner_token = require_bearer_token(request)
 
     # 开始会话
     workflow = get_workflow()
-    result = await workflow.start_session(request.skill_id)
+    result = await workflow.start_session(payload.skill_id, owner_token=owner_token)
 
     if "error" in result:
         raise HTTPException(status_code=500, detail=result["error"])
@@ -202,7 +227,7 @@ async def start_session(request: StartSessionRequest):
 
 
 @router.post("/message", response_model=SessionResponse)
-async def send_message(request: ChatRequest):
+async def send_message(payload: ChatRequest, request: Request):
     """
     发送消息
 
@@ -211,7 +236,9 @@ async def send_message(request: ChatRequest):
     """
     _ensure_llm_configured()
     workflow = get_workflow()
-    result = await workflow.chat(request.session_id, request.message)
+    owner_token = require_bearer_token(request)
+    _get_authorized_session(workflow, payload.session_id, owner_token)
+    result = await workflow.chat(payload.session_id, payload.message)
 
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -226,7 +253,7 @@ async def send_message(request: ChatRequest):
 
 
 @router.post("/generate/{session_id}")
-async def generate_document(session_id: str):
+async def generate_document(session_id: str, request: Request):
     """
     生成文档（非流式）
 
@@ -235,33 +262,45 @@ async def generate_document(session_id: str):
     """
     _ensure_llm_configured()
     workflow = get_workflow()
-    result = await workflow.generate_document(session_id)
+    owner_token = require_bearer_token(request)
+    _get_authorized_session(workflow, session_id, owner_token)
 
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-
-    return SessionResponse(
-        session_id=result["session_id"],
-        phase=result["phase"],
-        message=result["message"],
-        is_complete=result.get("is_complete", False),
-        document=result.get("document"),
+    job = _JOB_STORE.create_job(
+        owner_token=owner_token,
+        job_type="document_generation",
+        payload={"session_id": session_id},
     )
+
+    async def _runner():
+        try:
+            _JOB_STORE.update_job(job.id, status="running")
+            result = await workflow.generate_document(session_id)
+            if "error" in result:
+                _JOB_STORE.update_job(job.id, status="failed", error=result["error"], result=result)
+            else:
+                _JOB_STORE.update_job(job.id, status="succeeded", result=result)
+        except Exception as e:
+            _JOB_STORE.update_job(job.id, status="failed", error=str(e))
+
+    asyncio.create_task(_runner())
+
+    return {
+        "job_id": job.id,
+        "status": job.status,
+    }
 
 
 @router.get("/generate/{session_id}/stream")
-async def generate_document_stream(session_id: str):
+async def generate_document_stream(session_id: str, request: Request):
     """
     流式生成文档（SSE）
 
     - 在 writing 阶段调用
     - 实时返回生成过程
     """
+    owner_token = require_bearer_token(request, allow_query=True)
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     if session.phase != "writing":
         raise HTTPException(
@@ -274,11 +313,13 @@ async def generate_document_stream(session_id: str):
     async def event_generator():
         try:
             async for event in workflow.generate_document_stream(session_id):
+                if await request.is_disconnected():
+                    break
                 # 格式化为 SSE
                 data = json.dumps(event, ensure_ascii=False)
                 yield f"data: {data}\n\n"
-        except Exception as e:
-            error_event = json.dumps({"type": "error", "error": str(e)})
+        except Exception:
+            error_event = json.dumps({"type": "error", "error": _client_error_message()})
             yield f"data: {error_event}\n\n"
 
     return StreamingResponse(
@@ -293,13 +334,11 @@ async def generate_document_stream(session_id: str):
 
 
 @router.get("/session/{session_id}")
-async def get_session(session_id: str):
+async def get_session(session_id: str, request: Request):
     """获取会话状态"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     return {
         "session_id": session.session_id,
@@ -313,13 +352,11 @@ async def get_session(session_id: str):
 
 
 @router.get("/session/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: str, request: Request):
     """获取会话消息历史"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     return {
         "session_id": session.session_id,
@@ -328,13 +365,11 @@ async def get_session_messages(session_id: str):
 
 
 @router.get("/session/{session_id}/document")
-async def get_session_document(session_id: str):
+async def get_session_document(session_id: str, request: Request):
     """获取会话生成的文档"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     if not session.final_document:
         raise HTTPException(status_code=404, detail="Document not generated yet")
@@ -735,6 +770,7 @@ async def _handle_parsed_upload(
     extracted_fields = extraction_result.get("extracted_fields", {})
     upload_message = f"📎 已上传 {len(parsed_files)} 个文件并提取信息：\n" + "\n".join(file_summaries)
     merged_external_information = session.external_information or ""
+    session_guideline = None
 
     # Merge/save must be serialized per session; uploads may arrive concurrently.
     session_lock = await _get_upload_session_lock(session.session_id)
@@ -800,6 +836,20 @@ async def _handle_parsed_upload(
         except Exception as e:
             print(f"[Skill Fixer Warning] {e}")
 
+    # Triadic session guideline: refresh after upload/extraction (best effort).
+    if has_llm_credentials():
+        try:
+            latest_session = workflow.get_session(session.session_id)
+            if latest_session:
+                guideline_result = await workflow.generate_session_guideline(
+                    latest_session,
+                    skill,
+                    force=True,
+                )
+                session_guideline = guideline_result.get("guideline")
+        except Exception as e:
+            print(f"[Guideline Warning] {e}")
+
     return {
         "success": True,
         "session_id": session.session_id,
@@ -811,12 +861,14 @@ async def _handle_parsed_upload(
         "extracted_fields": extracted_fields,
         "external_information": external_info[:500] + "..." if len(external_info) > 500 else external_info,
         "summaries": extraction_result.get("summaries", ""),
+        "session_guideline": session_guideline,
     }
 
 
 @router.post("/session/{session_id}/upload-json")
 async def upload_files_json(
     session_id: str,
+    request: Request,
     payload: UploadFilesRequest,
 ):
     """
@@ -828,10 +880,8 @@ async def upload_files_json(
     """
     # 验证会话存在
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     if session.phase not in ["init", "requirement"]:
         raise HTTPException(
@@ -860,7 +910,7 @@ async def upload_files_json(
         print(f"[File Upload Error] {traceback.format_exc()}")
         raise HTTPException(
             status_code=500,
-            detail=str(e)
+            detail=_redact_secrets(str(e))
         )
 
 
@@ -868,6 +918,7 @@ if MULTIPART_AVAILABLE:
     @router.post("/session/{session_id}/upload")
     async def upload_files(
         session_id: str,
+        request: Request,
         files: List[UploadFile] = File(...),
     ):
         """
@@ -879,10 +930,8 @@ if MULTIPART_AVAILABLE:
         """
         # 验证会话存在
         workflow = get_workflow()
-        session = workflow.get_session(session_id)
-
-        if not session:
-            raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+        owner_token = require_bearer_token(request)
+        session = _get_authorized_session(workflow, session_id, owner_token)
 
         if session.phase not in ["init", "requirement"]:
             raise HTTPException(
@@ -911,18 +960,16 @@ if MULTIPART_AVAILABLE:
             print(f"[File Upload Error] {traceback.format_exc()}")
             raise HTTPException(
                 status_code=500,
-                detail=str(e)
+                detail=_redact_secrets(str(e))
             )
 
 
 @router.get("/session/{session_id}/files")
-async def get_session_files(session_id: str):
+async def get_session_files(session_id: str, request: Request):
     """获取会话上传的文件列表"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     files = [
         {k: v for k, v in file_info.items() if k != "content"}
@@ -937,13 +984,11 @@ async def get_session_files(session_id: str):
 
 
 @router.post("/session/{session_id}/generate-field")
-async def generate_field(session_id: str, request: GenerateFieldRequest):
+async def generate_field(session_id: str, payload: GenerateFieldRequest, request: Request):
     """基于已上传材料生成单个字段内容"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     if not session.uploaded_files:
         raise HTTPException(status_code=400, detail="No uploaded files found for this session")
@@ -956,9 +1001,9 @@ async def generate_field(session_id: str, request: GenerateFieldRequest):
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
-    field = next((f for f in skill.requirement_fields if f.id == request.field_id), None)
+    field = next((f for f in skill.requirement_fields if f.id == payload.field_id), None)
     if not field:
-        raise HTTPException(status_code=404, detail=f"Field not found: {request.field_id}")
+        raise HTTPException(status_code=404, detail=f"Field not found: {payload.field_id}")
 
     files = [
         {
@@ -1062,18 +1107,17 @@ async def _duckduckgo_search(query: str, top_k: int = 5) -> List[dict]:
 
 
 @router.post("/session/{session_id}/search-web")
-async def search_web(session_id: str, request: WebSearchRequest):
+async def search_web(session_id: str, payload: WebSearchRequest, request: Request):
     """Web 搜索并把来源追加到会话 external_information（用于后续写作引用/背景补充）"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
-    query = (request.query or "").strip()
+    query = (payload.query or "").strip()
     if not query:
         raise HTTPException(status_code=400, detail="query 不能为空")
 
-    results = await _duckduckgo_search(query, request.top_k)
+    results = await _duckduckgo_search(query, payload.top_k)
     if not results:
         return {"success": True, "session_id": session_id, "query": query, "results": [], "message": "未检索到结果"}
 
@@ -1806,12 +1850,11 @@ def _apply_diagram_insertions(
 
 
 @router.post("/session/{session_id}/generate-diagram")
-async def generate_diagram(session_id: str, request: DiagramRequest):
+async def generate_diagram(session_id: str, payload: DiagramRequest, request: Request):
     """生成图示：`image_model` 走成图模型；`infographic` 走本地信息图渲染（无外部成图依赖）。"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     _ensure_llm_configured()
 
@@ -1820,11 +1863,11 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {session.skill_id}")
 
-    diagram_type = (request.diagram_type or "technical_route").strip().lower() or "technical_route"
+    diagram_type = (payload.diagram_type or "technical_route").strip().lower() or "technical_route"
     if diagram_type not in {"technical_route", "research_framework", "freestyle", "infographic"}:
         raise HTTPException(status_code=400, detail=f"Unsupported diagram_type: {diagram_type}")
 
-    mode = (request.mode or "infographic").strip().lower() or "infographic"
+    mode = (payload.mode or "infographic").strip().lower() or "infographic"
     if mode not in {"infographic", "image_model", "auto"}:
         raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
     if mode == "auto":
@@ -1844,12 +1887,12 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
         "freestyle": "科研示意图",
         "infographic": "科研信息图",
     }
-    title = (request.title or default_title.get(diagram_type, "图示")).strip()
+    title = (payload.title or default_title.get(diagram_type, "图示")).strip()
 
-    if request.selected_text:
-        selected_text = (request.selected_text or "").strip()
+    if payload.selected_text:
+        selected_text = (payload.selected_text or "").strip()
         requirements_text = selected_text or "（暂无）"
-        external_excerpt = (request.context_text or "").strip()
+        external_excerpt = (payload.context_text or "").strip()
         if len(external_excerpt) > 12000:
             external_excerpt = external_excerpt[:12000]
     else:
@@ -1868,8 +1911,8 @@ async def generate_diagram(session_id: str, request: DiagramRequest):
             external_excerpt = external_excerpt[:2500]
 
     raw_spec = {}
-    full_context_for_codegen = (request.context_text or external_excerpt or "").strip()
-    focus_context_for_codegen = (request.selected_text or requirements_text or "").strip()
+    full_context_for_codegen = (payload.context_text or external_excerpt or "").strip()
+    focus_context_for_codegen = (payload.selected_text or requirements_text or "").strip()
 
     if mode == "infographic":
         raw_spec = await _generate_local_infographic_spec_via_skill(
@@ -1974,7 +2017,7 @@ JSON 结构示例：
                         parts.append(f"{t}：{btxt}".strip("："))
             return "\n".join(parts) if parts else requirements_text
 
-        source = ((request.selected_text or "").strip() or requirements_text or "").strip()
+        source = ((payload.selected_text or "").strip() or requirements_text or "").strip()
         pieces = [x.strip("•- \t") for x in re.split(r"[\n；;]+", source) if x and x.strip("•- \t")]
         if not pieces:
             return "1. 研究目标与问题定义\n2. 方法与技术路径\n3. 验证与成果输出"
@@ -2200,7 +2243,7 @@ JSON 结构示例：
 
 
 @router.post("/session/{session_id}/generate-illustrations")
-async def generate_illustrations(session_id: str, request: GenerateIllustrationsRequest):
+async def generate_illustrations(session_id: str, payload: GenerateIllustrationsRequest, request: Request):
     """
     文章配图 Agent：
     1) 基于全文规划要生成的图；
@@ -2208,25 +2251,24 @@ async def generate_illustrations(session_id: str, request: GenerateIllustrations
     3) 最后再调用一次 LLM 规划插入位置并完成插入。
     """
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
     if session.phase != "complete":
         raise HTTPException(status_code=400, detail="全文尚未生成完成，请先完成文档生成后再触发配图。")
 
     _ensure_llm_configured()
 
-    document_content = _normalize_markdown_text(request.document_content or "")
+    document_content = _normalize_markdown_text(payload.document_content or "")
     if len(document_content.strip()) < 30:
         raise HTTPException(status_code=400, detail="文章内容过短，无法自动配图。")
 
-    mode = (request.mode or "infographic").strip().lower() or "infographic"
+    mode = (payload.mode or "infographic").strip().lower() or "infographic"
     if mode not in {"infographic", "image_model", "auto"}:
         raise HTTPException(status_code=400, detail=f"Unsupported mode: {mode}")
     if mode == "auto":
         mode = "infographic"
 
-    max_images = max(1, min(int(request.max_images or 2), 4))
+    max_images = max(1, min(int(payload.max_images or 2), 4))
 
     registry = get_registry()
     schematics_skill = registry.get("scientific-schematics")
@@ -2248,13 +2290,14 @@ async def generate_illustrations(session_id: str, request: GenerateIllustrations
         try:
             result = await generate_diagram(
                 session_id=session_id,
-                request=DiagramRequest(
+                payload=DiagramRequest(
                     title=item.get("title") or None,
                     diagram_type=item.get("diagram_type") or "infographic",
                     mode=mode,
                     selected_text=(item.get("focus_text") or "").strip() or document_content[:1600],
                     context_text=document_content,
                 ),
+                request=request,
             )
             created.append({
                 "diagram_id": result.get("diagram_id"),
@@ -2299,12 +2342,11 @@ async def generate_illustrations(session_id: str, request: GenerateIllustrations
 
 
 @router.get("/session/{session_id}/diagrams")
-async def list_diagrams(session_id: str):
+async def list_diagrams(session_id: str, request: Request):
     """List session diagrams (metadata only)."""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     diagrams = session.diagrams or []
     return {
@@ -2328,12 +2370,11 @@ async def list_diagrams(session_id: str):
 
 
 @router.get("/session/{session_id}/diagrams/{diagram_id}.svg")
-async def get_diagram_svg(session_id: str, diagram_id: str):
+async def get_diagram_svg(session_id: str, diagram_id: str, request: Request):
     """Download a stored diagram SVG (infographic mode)."""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request, allow_query=True)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     diagram = next((d for d in (session.diagrams or []) if isinstance(d, dict) and d.get("id") == diagram_id), None)
     if not diagram:
@@ -2364,12 +2405,11 @@ async def get_diagram_svg(session_id: str, diagram_id: str):
 
 
 @router.get("/session/{session_id}/diagrams/{diagram_id}.png")
-async def get_diagram_png(session_id: str, diagram_id: str):
+async def get_diagram_png(session_id: str, diagram_id: str, request: Request):
     """Download a stored diagram PNG."""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request, allow_query=True)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     diagram = next((d for d in (session.diagrams or []) if isinstance(d, dict) and d.get("id") == diagram_id), None)
     if not diagram:
@@ -2394,7 +2434,7 @@ class UpdateRequirementsRequest(BaseModel):
 
 
 @router.put("/session/{session_id}/requirements")
-async def update_requirements(session_id: str, request: UpdateRequirementsRequest):
+async def update_requirements(session_id: str, payload: UpdateRequirementsRequest, request: Request):
     """
     直接更新会话的需求字段
 
@@ -2402,17 +2442,15 @@ async def update_requirements(session_id: str, request: UpdateRequirementsReques
     - 不需要通过对话收集
     """
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     # 更新需求
     if session.requirements is None:
         session.requirements = {}
 
     # 合并新的需求（保留已有值，除非明确覆盖）
-    for key, value in request.requirements.items():
+    for key, value in payload.requirements.items():
         if value is None:
             session.requirements.pop(key, None)
             continue
@@ -2432,13 +2470,11 @@ async def update_requirements(session_id: str, request: UpdateRequirementsReques
 
 
 @router.get("/session/{session_id}/requirements")
-async def get_requirements(session_id: str):
+async def get_requirements(session_id: str, request: Request):
     """获取会话的需求字段"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     # 获取 Skill 的字段定义
     registry = get_registry()
@@ -2481,7 +2517,7 @@ async def get_requirements(session_id: str):
         "fields": fields,
         "external_information": session.external_information,
         "skill_overlay": session.skill_overlay,
-        "planner_plan": session.planner_plan,
+        "session_guideline": getattr(session, "session_guideline", None),
         "diagrams": [
             {
                 "id": d.get("id"),
@@ -2501,19 +2537,19 @@ async def get_requirements(session_id: str):
 
 
 @router.get("/session/{session_id}/plan")
-async def get_planner_plan(session_id: str):
-    """获取会话的 Planner 蓝图"""
+async def get_planner_plan(session_id: str, request: Request):
+    """兼容旧接口：Planner 已下线，统一改为 session_guideline。"""
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
-    if not session.planner_plan:
-        raise HTTPException(status_code=404, detail="Planner 蓝图尚未生成")
-    return {"session_id": session_id, "planner_plan": session.planner_plan}
+    owner_token = require_bearer_token(request)
+    _get_authorized_session(workflow, session_id, owner_token)
+    raise HTTPException(
+        status_code=410,
+        detail="Planner 蓝图接口已下线，请改用 /chat/session/{session_id}/requirements 返回的 session_guideline。",
+    )
 
 
 @router.post("/session/{session_id}/start-generation")
-async def start_generation(session_id: str):
+async def start_generation(session_id: str, request: Request):
     """
     开始文档生成
 
@@ -2521,10 +2557,8 @@ async def start_generation(session_id: str):
     - 将阶段切换到 writing
     """
     workflow = get_workflow()
-    session = workflow.get_session(session_id)
-
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session not found: {session_id}")
+    owner_token = require_bearer_token(request)
+    session = _get_authorized_session(workflow, session_id, owner_token)
 
     # 获取 Skill 的字段定义
     registry = get_registry()
@@ -2551,15 +2585,27 @@ async def start_generation(session_id: str):
         # - 有材料：允许继续生成，后续在写作过程中让模型基于材料补全/自洽
         # - 无材料：仍提示用户补充关键信息
         if session.uploaded_files:
-            session.phase = "writing"
-            workflow.save_session(session)
+            try:
+                session.phase = "guideline"
+                workflow.save_session(session)
+                guideline_result = await workflow.generate_session_guideline(session, skill, force=True)
+                latest_session = workflow.get_session(session_id) or session
+                latest_session.phase = "writing"
+                workflow.save_session(latest_session)
+            except Exception as e:
+                latest_session = workflow.get_session(session_id) or session
+                latest_session.phase = "requirement"
+                workflow.save_session(latest_session)
+                raise HTTPException(status_code=500, detail=f"生成会话级研究指南失败：{_redact_secrets(str(e))}")
             return {
                 "success": True,
                 "session_id": session_id,
                 "phase": "writing",
-                "message": "将基于已上传材料继续生成（部分字段缺失将自动补全/弱化）。",
+                "message": "已生成会话级研究指南，将基于已上传材料继续生成（部分字段缺失将自动补全/弱化）。",
                 "missing_fields": missing_fields,
                 "warning": f"以下字段在材料中未明确提取到：{', '.join(missing_fields)}",
+                "session_guideline": guideline_result.get("guideline"),
+                "guideline_source": guideline_result.get("source"),
             }
         return {
             "success": False,
@@ -2568,13 +2614,27 @@ async def start_generation(session_id: str):
             "missing_fields": missing_fields,
         }
 
+    # Mandatory step: 进入写作前必须生成会话级三元研究指南
+    try:
+        session.phase = "guideline"
+        workflow.save_session(session)
+        guideline_result = await workflow.generate_session_guideline(session, skill, force=True)
+    except Exception as e:
+        latest_session = workflow.get_session(session_id) or session
+        latest_session.phase = "requirement"
+        workflow.save_session(latest_session)
+        raise HTTPException(status_code=500, detail=f"生成会话级研究指南失败：{_redact_secrets(str(e))}")
+
     # 切换到写作阶段
-    session.phase = "writing"
-    workflow.save_session(session)
+    latest_session = workflow.get_session(session_id) or session
+    latest_session.phase = "writing"
+    workflow.save_session(latest_session)
 
     return {
         "success": True,
         "session_id": session_id,
         "phase": "writing",
-        "message": "开始生成文档...",
+        "message": "会话级研究指南已生成，开始生成文档...",
+        "session_guideline": guideline_result.get("guideline"),
+        "guideline_source": guideline_result.get("source"),
     }
