@@ -18,6 +18,7 @@ from backend.core.llm.config_store import (
     LLMProviderType,
 )
 from backend.core.llm.providers import reset_llm_client, get_llm_client
+from backend.core.llm.gateway import reset_global_gateway
 
 router = APIRouter()
 
@@ -179,6 +180,7 @@ async def update_config(request: ConfigUpdateRequest):
 
     if save_llm_config(new_config):
         reset_llm_client()
+        reset_global_gateway()
         return {"success": True, "message": "Configuration updated"}
     else:
         raise HTTPException(status_code=500, detail="Failed to save configuration")
@@ -344,6 +346,7 @@ async def github_device_poll(device_code: str = Query(...)):
                 config.github_user = user_data.get("login")
                 save_llm_config(config)
                 reset_llm_client()
+                reset_global_gateway()
 
                 # 清理状态
                 if device_code in _device_flow_states:
@@ -369,6 +372,7 @@ async def github_logout():
     config.github_user = None
     save_llm_config(config)
     reset_llm_client()
+    reset_global_gateway()
     return {"success": True}
 
 
