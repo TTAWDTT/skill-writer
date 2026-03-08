@@ -8,8 +8,7 @@ from typing import Optional, Tuple, Dict, Any
 import subprocess
 import tempfile
 
-from backend.core.llm.config_store import get_llm_config
-from backend.core.llm.providers import get_llm_client
+from backend.core.llm.gateway import get_global_gateway
 from backend.config import DATA_DIR
 
 logger = logging.getLogger(__name__)
@@ -133,11 +132,9 @@ Constraints:
 
 Generate Python Code:
 """
-        config = get_llm_config()
-        client = get_llm_client(config)
-
         messages = [{"role": "user", "content": prompt}]
-        code = await client.chat(messages, temperature=0.2)
+        gateway = get_global_gateway()
+        code = await gateway.chat(messages, temperature=0.2)
 
         # Cleanup markdown
         code = code.replace("```python", "").replace("```", "").strip()
