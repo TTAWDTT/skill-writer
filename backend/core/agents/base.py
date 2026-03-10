@@ -5,7 +5,6 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, AsyncGenerator
 
 from backend.core.llm.gateway import LLMGateway, get_global_gateway
-from backend.core.llm.config_store import get_llm_config
 
 
 class BaseAgent(ABC):
@@ -24,15 +23,13 @@ class BaseAgent(ABC):
 
     @property
     def model(self) -> str:
-        """获取当前模型名称"""
-        config = get_llm_config()
-        return config.model
+        """获取当前模型名称（经由 Gateway 配置）"""
+        return self.gateway.config.model
 
     @property
     def temperature(self) -> float:
-        """获取当前温度设置"""
-        config = get_llm_config()
-        return config.temperature
+        """获取当前温度设置（经由 Gateway 配置）"""
+        return self.gateway.config.temperature
 
     async def _chat(
         self,
