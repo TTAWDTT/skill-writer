@@ -68,6 +68,6 @@ async def get_job(job_id: str, http_request: Request):
 async def list_jobs(http_request: Request, limit: int = 50):
     """列出当前用户最近的 Job"""
     owner_token = require_bearer_token(http_request)
-    jobs = store.list_jobs_for_owner(owner_token, limit=limit)
+    safe_limit = max(1, min(limit, 200))
+    jobs = store.list_jobs_for_owner(owner_token, limit=safe_limit)
     return [_serialize_job(job) for job in jobs]
-

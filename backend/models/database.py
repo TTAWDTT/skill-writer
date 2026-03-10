@@ -182,6 +182,8 @@ class Database:
         if "owner_token" not in existing_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN owner_token TEXT DEFAULT ''"))
+        with self.engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_owner_token ON sessions (owner_token)"))
         if "skill_overlay" not in existing_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN skill_overlay TEXT"))
@@ -202,6 +204,9 @@ class Database:
         if doc_columns and "owner_token" not in doc_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE documents ADD COLUMN owner_token TEXT DEFAULT ''"))
+        if doc_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_owner_token ON documents (owner_token)"))
 
     def get_session(self):
         """获取数据库会话"""
