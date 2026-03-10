@@ -7,7 +7,7 @@ import asyncio
 import logging
 import os
 
-from backend.core.llm.providers import get_llm_client
+from backend.core.llm.gateway import get_global_gateway
 from backend.core.skills.template_parser import parse_template_file
 
 logger = logging.getLogger(__name__)
@@ -126,9 +126,9 @@ async def extract_info_from_file(
     ]
 
     # 调用 LLM
-    llm_client = get_llm_client()
+    gateway = get_global_gateway()
     logger.info("[extract] calling llm for file=%s chars=%s", filename, len(file_content or ""))
-    response = await llm_client.chat(messages, temperature=0.2, max_tokens=4096)
+    response = await gateway.chat(messages, temperature=0.2, max_tokens=4096)
 
     # 解析响应
     return _parse_extraction_response(response, filename)
@@ -315,8 +315,8 @@ async def generate_field_from_files(
         {"role": "user", "content": user_prompt}
     ]
 
-    llm_client = get_llm_client()
-    response = await llm_client.chat(messages, temperature=0.2, max_tokens=1024)
+    gateway = get_global_gateway()
+    response = await gateway.chat(messages, temperature=0.2, max_tokens=1024)
     value = _parse_field_generation_response(response)
 
     if isinstance(value, (dict, list)):
