@@ -276,11 +276,21 @@ async def generate_document(session_id: str, request: Request):
             _JOB_STORE.update_job(job.id, status="running")
             result = await workflow.generate_document(session_id)
             if "error" in result:
-                _JOB_STORE.update_job(job.id, status="failed", error=result["error"], result=result)
+                safe_error = _redact_secrets(str(result["error"]))
+                _JOB_STORE.update_job(job.id, status="failed", error=safe_error, result=result)
             else:
                 _JOB_STORE.update_job(job.id, status="succeeded", result=result)
         except Exception as e:
-            _JOB_STORE.update_job(job.id, status="failed", error=str(e))
+            logger.exception(
+                "Unhandled error during document generation for session %s (job_id=%s)",
+                session_id,
+                job.id,
+            )
+            _JOB_STORE.update_job(
+                job.id,
+                status="failed",
+                error=_client_error_message(e),
+            )
 
     asyncio.create_task(_runner())
 
