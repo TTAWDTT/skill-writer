@@ -13,12 +13,29 @@ class BaseAgent(ABC):
 
     def __init__(self, llm_client: Optional[LLMProvider] = None):
         self._llm_client = llm_client
+        self._llm_config_fingerprint: Optional[tuple] = None
+
+    def _get_llm_config_fingerprint(self) -> tuple:
+        """构建当前 LLM 配置指纹，用于识别配置热切换。"""
+        config = get_llm_config()
+        return (
+            str(config.provider),
+            config.provider_name,
+            config.base_url,
+            config.model,
+            config.image_model,
+            config.api_key,
+            config.github_token,
+        )
 
     @property
     def client(self) -> LLMProvider:
         """获取 LLM 客户端（延迟初始化）"""
-        if self._llm_client is None:
-            self._llm_client = get_llm_client()
+        current_fingerprint = self._get_llm_config_fingerprint()
+        if self._llm_client is None or self._llm_config_fingerprint != current_fingerprint:
+            config = get_llm_config()
+            self._llm_client = get_llm_client(config)
+            self._llm_config_fingerprint = current_fingerprint
         return self._llm_client
 
     @property
