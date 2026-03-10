@@ -7,6 +7,8 @@ tags:
   - skill创建
   - 模板分析
   - 自动化
+role: skill_generator
+user-invocable: false
 ---
 
 # 文书写作 Skill 创建器

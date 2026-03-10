@@ -9,6 +9,8 @@ tags:
   - 科研基金
   - 面上项目
   - 青年项目
+role: document
+user-invocable: true
 ---
 
 # 国家自然科学基金申报书撰写 Skill

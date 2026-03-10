@@ -1,6 +1,8 @@
 ---
 name: scientific-schematics
 description: "Create publication-quality scientific diagrams, flowcharts, and schematics using Python (graphviz, matplotlib, schemdraw, networkx). Specialized in neural network architectures, system diagrams, and flowcharts. Generates SVG/EPS in figures/ folder with automated quality verification."
+role: workflow_helper
+user-invocable: false
 ---
 
 # Scientific Schematics and Diagrams
@@ -2032,4 +2034,3 @@ Before submitting diagrams, verify:
 - [ ] No compilation warnings or errors related to figure
 
 Use this skill to create clear, accessible, publication-quality diagrams that effectively communicate complex scientific concepts. The integrated quality verification workflow ensures all diagrams meet professional standards before publication.
-

@@ -11,6 +11,8 @@ import yaml
 from backend.core.skills.registry import get_registry, init_skills_from_directory
 from backend.core.skills.template_parser import parse_template_file
 from backend.core.skills.skill_generator import generate_skill_with_llm
+from backend.core.skills.base import SkillRole
+from backend.core.skills.validator import SkillDefinitionValidationError, validate_generated_skill_config
 from backend.core.llm.config_store import has_llm_credentials
 from backend.config import SKILLS_DIR
 
@@ -23,8 +25,6 @@ async def list_skills():
     registry = get_registry()
     skills = registry.get_all()
 
-    hidden_skills = {"writer-skill-creator", "writer_skill_creator", "base_writing"}
-
     return [
         {
             "id": skill.metadata.id,
@@ -32,9 +32,11 @@ async def list_skills():
             "description": skill.metadata.description,
             "category": skill.metadata.category,
             "tags": skill.metadata.tags,
+            "role": skill.metadata.role,
+            "user_invocable": skill.metadata.user_invocable,
         }
         for skill in skills
-        if skill.metadata.id not in hidden_skills
+        if skill.metadata.role == SkillRole.DOCUMENT and skill.metadata.user_invocable
     ]
 
 
@@ -88,6 +90,7 @@ async def create_skill_from_template(
             category=category,
             tags=tag_list
         )
+        warnings = validate_generated_skill_config(skill_config)
 
         skill_id = skill_config.get("skill_id")
         if not skill_id:
@@ -113,6 +116,7 @@ version: "1.0.0"
 category: {skill_config.get('category', 'custom')}
 tags: {skill_config.get('tags', [])}
 author: user
+role: document
 user-invocable: true
 ---
 
@@ -166,9 +170,16 @@ user-invocable: true
         return {
             "success": True,
             "skill_id": skill_id,
+            "role": "document",
+            "warnings": warnings,
             "message": f"Skill '{name}' created successfully using LLM analysis"
         }
 
+    except SkillDefinitionValidationError as e:
+        raise HTTPException(status_code=400, detail={
+            "message": "Generated skill definition is invalid",
+            "errors": e.errors,
+        })
     except HTTPException:
         raise
     except Exception as e:
@@ -194,6 +205,8 @@ async def get_skill(skill_id: str):
         "description": skill.metadata.description,
         "category": skill.metadata.category,
         "tags": skill.metadata.tags,
+        "role": skill.metadata.role,
+        "user_invocable": skill.metadata.user_invocable,
         "requirement_fields": [
             {
                 "id": f.id,
@@ -294,18 +307,19 @@ async def delete_skill(skill_id: str):
     注意：此操作不可逆，会删除 Skill 的所有文件
     """
     # 防止删除系统内置 Skill
-    protected_skills = {'writer-skill-creator', 'writer_skill_creator', 'base_writing'}
-    if skill_id in protected_skills:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Cannot delete system skill: {skill_id}"
-        )
+    protected_roles = {SkillRole.META_WRITING, SkillRole.WORKFLOW_HELPER, SkillRole.SKILL_GENERATOR}
 
     registry = get_registry()
     skill = registry.get(skill_id)
 
     if not skill:
         raise HTTPException(status_code=404, detail=f"Skill not found: {skill_id}")
+
+    if skill.metadata.role in protected_roles or not skill.metadata.user_invocable:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Cannot delete system skill: {skill_id}"
+        )
 
     # 获取 Skill 目录路径
     skill_dir = SKILLS_DIR / skill_id
