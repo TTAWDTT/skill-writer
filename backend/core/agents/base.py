@@ -4,22 +4,23 @@ Agent 基类
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, AsyncGenerator
 
-from backend.core.llm.providers import get_llm_client, LLMProvider
+from backend.core.llm.gateway import LLMGateway, get_global_gateway
 from backend.core.llm.config_store import get_llm_config
 
 
 class BaseAgent(ABC):
     """Agent 基类"""
 
-    def __init__(self, llm_client: Optional[LLMProvider] = None):
-        self._llm_client = llm_client
+    def __init__(self, llm_gateway: Optional[LLMGateway] = None):
+        # Allow dependency injection for testing or custom routing.
+        self._llm_gateway = llm_gateway
 
     @property
-    def client(self) -> LLMProvider:
-        """获取 LLM 客户端（延迟初始化）"""
-        if self._llm_client is None:
-            self._llm_client = get_llm_client()
-        return self._llm_client
+    def gateway(self) -> LLMGateway:
+        """获取 LLM Gateway（延迟初始化）"""
+        if self._llm_gateway is None:
+            self._llm_gateway = get_global_gateway()
+        return self._llm_gateway
 
     @property
     def model(self) -> str:
@@ -40,11 +41,7 @@ class BaseAgent(ABC):
         max_tokens: int = 4096,
     ) -> str:
         """调用 LLM"""
-        return await self.client.chat(
-            messages=messages,
-            temperature=temperature or self.temperature,
-            max_tokens=max_tokens,
-        )
+        return await self.gateway.chat(messages, temperature=temperature, max_tokens=max_tokens)
 
     async def _chat_stream(
         self,
@@ -53,9 +50,9 @@ class BaseAgent(ABC):
         max_tokens: int = 4096,
     ) -> AsyncGenerator[str, None]:
         """流式调用 LLM"""
-        async for chunk in self.client.chat_stream(
+        async for chunk in self.gateway.chat_stream(
             messages=messages,
-            temperature=temperature or self.temperature,
+            temperature=temperature,
             max_tokens=max_tokens,
         ):
             yield chunk
