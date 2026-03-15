@@ -21,6 +21,7 @@ class Session(Base):
 
     id = Column(String(36), primary_key=True)
     skill_id = Column(String(100), nullable=False, index=True)
+    owner_token = Column(String(255), nullable=False, default="", index=True)
     phase = Column(String(50), default="init")
 
     # JSON 存储的字段
@@ -40,8 +41,11 @@ class Session(Base):
     # 会话级 Skill 覆盖
     skill_overlay = Column(Text, nullable=True)  # JSON
 
-    # Planner 蓝图（JSON）
+    # Deprecated legacy column for planner blueprint (kept for DB compatibility)
     planner_plan = Column(Text, nullable=True)  # JSON
+
+    # 会话级三元研究指南（JSON）
+    session_guideline = Column(Text, nullable=True)  # JSON
 
     # 生成的图示（SVG/mermaid 等），用于导出/下载
     diagrams = Column(Text, default="[]")  # JSON
@@ -61,6 +65,7 @@ class Session(Base):
         return {
             "session_id": self.id,
             "skill_id": self.skill_id,
+            "owner_token": self.owner_token,
             "phase": self.phase,
             "requirement_state": json.loads(self.requirement_state) if self.requirement_state else None,
             "requirements": json.loads(self.requirements) if self.requirements else None,
@@ -71,7 +76,7 @@ class Session(Base):
             "uploaded_files": json.loads(self.uploaded_files) if self.uploaded_files else [],
             "external_information": self.external_information or "",
             "skill_overlay": json.loads(self.skill_overlay) if self.skill_overlay else None,
-            "planner_plan": json.loads(self.planner_plan) if self.planner_plan else None,
+            "session_guideline": json.loads(self.session_guideline) if self.session_guideline else None,
             "diagrams": json.loads(self.diagrams) if self.diagrams else [],
             "final_document": self.final_document,
             "error": self.error,
@@ -87,6 +92,7 @@ class Document(Base):
     id = Column(String(36), primary_key=True)
     session_id = Column(String(36), nullable=True, index=True)
     skill_id = Column(String(100), nullable=False, index=True)
+    owner_token = Column(String(255), nullable=False, default="", index=True)
     title = Column(String(255), nullable=False)
     content = Column(Text, nullable=False)
 
@@ -103,9 +109,40 @@ class Document(Base):
             "id": self.id,
             "session_id": self.session_id,
             "skill_id": self.skill_id,
+            "owner_token": self.owner_token,
             "title": self.title,
             "content": self.content,
             "sections": json.loads(self.sections) if self.sections else {},
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "updated_at": self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class Job(Base):
+    """后台任务模型"""
+    __tablename__ = "jobs"
+
+    id = Column(String(36), primary_key=True)
+    owner_token = Column(String(255), nullable=False, default="", index=True)
+    type = Column(String(64), nullable=False, index=True)
+    status = Column(String(32), nullable=False, default="pending", index=True)  # pending | running | succeeded | failed
+    payload = Column(Text, nullable=True)  # JSON
+    result = Column(Text, nullable=True)   # JSON
+    error = Column(Text, nullable=True)
+
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_dict(self) -> dict:
+        """转换为字典"""
+        return {
+            "id": self.id,
+            "owner_token": self.owner_token,
+            "type": self.type,
+            "status": self.status,
+            "payload": json.loads(self.payload) if self.payload else None,
+            "result": json.loads(self.result) if self.result else None,
+            "error": self.error,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -142,6 +179,11 @@ class Database:
             return
 
         existing_columns = {col["name"] for col in inspector.get_columns("sessions")}
+        if "owner_token" not in existing_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN owner_token TEXT DEFAULT ''"))
+        with self.engine.begin() as connection:
+            connection.execute(text("CREATE INDEX IF NOT EXISTS ix_sessions_owner_token ON sessions (owner_token)"))
         if "skill_overlay" not in existing_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN skill_overlay TEXT"))
@@ -150,9 +192,21 @@ class Database:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN planner_plan TEXT"))
 
+        if "session_guideline" not in existing_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE sessions ADD COLUMN session_guideline TEXT"))
+
         if "diagrams" not in existing_columns:
             with self.engine.begin() as connection:
                 connection.execute(text("ALTER TABLE sessions ADD COLUMN diagrams TEXT DEFAULT '[]'"))
+
+        doc_columns = {col["name"] for col in inspector.get_columns("documents")} if "documents" in inspector.get_table_names() else set()
+        if doc_columns and "owner_token" not in doc_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("ALTER TABLE documents ADD COLUMN owner_token TEXT DEFAULT ''"))
+        if doc_columns:
+            with self.engine.begin() as connection:
+                connection.execute(text("CREATE INDEX IF NOT EXISTS ix_documents_owner_token ON documents (owner_token)"))
 
     def get_session(self):
         """获取数据库会话"""
