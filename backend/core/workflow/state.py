@@ -22,7 +22,8 @@ class SessionState:
     """会话状态"""
     session_id: str
     skill_id: str
-    phase: str = "init"  # init, requirement, writing, review, complete, error
+    owner_token: str = ""
+    phase: str = "init"  # init, requirement, guideline, writing, review, complete, error
 
     # 需求收集状态
     requirement_state: Optional[Dict] = None
@@ -52,6 +53,9 @@ class SessionState:
 
     # Planner 输出的全文蓝图（可用于前端展示/复用）
     planner_plan: Optional[Dict] = None
+
+    # 会话级三元研究指南（需求-研究内容-研究目标）
+    session_guideline: Optional[Dict] = None
 
     # 会话内生成的图示（SVG 等，可下载/可复用）
     diagrams: List[Dict] = field(default_factory=list)

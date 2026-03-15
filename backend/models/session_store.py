@@ -25,6 +25,7 @@ class DatabaseSessionStore:
             return SessionState(
                 session_id=record.id,
                 skill_id=record.skill_id,
+                owner_token=getattr(record, "owner_token", "") or "",
                 phase=record.phase,
                 requirement_state=json.loads(record.requirement_state) if record.requirement_state else None,
                 requirements=json.loads(record.requirements) if record.requirements else None,
@@ -37,6 +38,7 @@ class DatabaseSessionStore:
                 external_information=record.external_information or "",
                 skill_overlay=json.loads(record.skill_overlay) if record.skill_overlay else None,
                 planner_plan=json.loads(record.planner_plan) if getattr(record, "planner_plan", None) else None,
+                session_guideline=json.loads(record.session_guideline) if getattr(record, "session_guideline", None) else None,
                 diagrams=json.loads(record.diagrams) if getattr(record, "diagrams", None) else [],
                 created_at=record.created_at.isoformat() if record.created_at else datetime.now().isoformat(),
                 updated_at=record.updated_at.isoformat() if record.updated_at else datetime.now().isoformat(),
@@ -51,6 +53,7 @@ class DatabaseSessionStore:
             if record:
                 # 更新现有记录
                 record.skill_id = session.skill_id
+                record.owner_token = getattr(session, "owner_token", "") or ""
                 record.phase = session.phase
                 record.requirement_state = json.dumps(session.requirement_state) if session.requirement_state else None
                 record.requirements = json.dumps(session.requirements) if session.requirements else None
@@ -62,6 +65,7 @@ class DatabaseSessionStore:
                 record.external_information = session.external_information
                 record.skill_overlay = json.dumps(session.skill_overlay) if session.skill_overlay else None
                 record.planner_plan = json.dumps(getattr(session, "planner_plan", None)) if getattr(session, "planner_plan", None) else None
+                record.session_guideline = json.dumps(getattr(session, "session_guideline", None)) if getattr(session, "session_guideline", None) else None
                 record.diagrams = json.dumps(getattr(session, "diagrams", []) or [])
                 record.final_document = session.final_document
                 record.error = session.error
@@ -71,6 +75,7 @@ class DatabaseSessionStore:
                 record = SessionModel(
                     id=session.session_id,
                     skill_id=session.skill_id,
+                    owner_token=getattr(session, "owner_token", "") or "",
                     phase=session.phase,
                     requirement_state=json.dumps(session.requirement_state) if session.requirement_state else None,
                     requirements=json.dumps(session.requirements) if session.requirements else None,
@@ -82,6 +87,7 @@ class DatabaseSessionStore:
                     external_information=session.external_information,
                     skill_overlay=json.dumps(session.skill_overlay) if session.skill_overlay else None,
                     planner_plan=json.dumps(getattr(session, "planner_plan", None)) if getattr(session, "planner_plan", None) else None,
+                    session_guideline=json.dumps(getattr(session, "session_guideline", None)) if getattr(session, "session_guideline", None) else None,
                     diagrams=json.dumps(getattr(session, "diagrams", []) or []),
                     final_document=session.final_document,
                     error=session.error,
@@ -106,6 +112,7 @@ class DatabaseSessionStore:
                 SessionState(
                     session_id=r.id,
                     skill_id=r.skill_id,
+                    owner_token=getattr(r, "owner_token", "") or "",
                     phase=r.phase,
                     requirement_state=json.loads(r.requirement_state) if r.requirement_state else None,
                     requirements=json.loads(r.requirements) if r.requirements else None,
@@ -118,6 +125,7 @@ class DatabaseSessionStore:
                     external_information=r.external_information or "",
                     skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
                     planner_plan=json.loads(r.planner_plan) if getattr(r, "planner_plan", None) else None,
+                    session_guideline=json.loads(r.session_guideline) if getattr(r, "session_guideline", None) else None,
                     diagrams=json.loads(r.diagrams) if getattr(r, "diagrams", None) else [],
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),
@@ -140,6 +148,7 @@ class DatabaseSessionStore:
                 SessionState(
                     session_id=r.id,
                     skill_id=r.skill_id,
+                    owner_token=getattr(r, "owner_token", "") or "",
                     phase=r.phase,
                     requirement_state=json.loads(r.requirement_state) if r.requirement_state else None,
                     requirements=json.loads(r.requirements) if r.requirements else None,
@@ -152,6 +161,7 @@ class DatabaseSessionStore:
                     external_information=r.external_information or "",
                     skill_overlay=json.loads(r.skill_overlay) if r.skill_overlay else None,
                     planner_plan=json.loads(r.planner_plan) if getattr(r, "planner_plan", None) else None,
+                    session_guideline=json.loads(r.session_guideline) if getattr(r, "session_guideline", None) else None,
                     diagrams=json.loads(r.diagrams) if getattr(r, "diagrams", None) else [],
                     created_at=r.created_at.isoformat() if r.created_at else datetime.now().isoformat(),
                     updated_at=r.updated_at.isoformat() if r.updated_at else datetime.now().isoformat(),

@@ -77,11 +77,12 @@ class SimpleWorkflow:
             value = 3
         return max(1, min(value, 8))
 
-    def create_session(self, skill_id: str) -> SessionState:
+    def create_session(self, skill_id: str, owner_token: str = "") -> SessionState:
         """创建新会话"""
         session = SessionState(
             session_id=str(uuid.uuid4()),
             skill_id=skill_id,
+            owner_token=owner_token or "",
         )
         self.store.save(session)
         return session
@@ -94,7 +95,7 @@ class SimpleWorkflow:
         """保存会话"""
         self.store.save(session)
 
-    async def start_session(self, skill_id: str) -> Dict[str, Any]:
+    async def start_session(self, skill_id: str, *, owner_token: str = "") -> Dict[str, Any]:
         """
         开始新会话，返回初始问候语
         """
@@ -106,7 +107,7 @@ class SimpleWorkflow:
             }
 
         # 创建会话
-        session = self.create_session(skill_id)
+        session = self.create_session(skill_id, owner_token=owner_token or "")
 
         # 获取初始问候
         result = await self.requirement_agent.run(skill, "", None)
